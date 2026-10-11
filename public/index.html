@@ -1,1 +1,39 @@
-
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAHADIMSUM POS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar"><h1 class="brand"><img src="/logo-mahadimsum.PNG" alt="MAHADIMSUM" class="brand-logo"> MAHADIMSUM</h1></header>
+  <main>
+    <div class="card" style="margin-top:40px;">
+      <h2 class="center">Masuk</h2>
+      <input id="username" placeholder="Username" autocomplete="username">
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="big" onclick="login()">Masuk</button>
+      <div id="err" class="error"></div>
+    </div>
+  </main>
+</div>
+<script src="api.js"></script>
+<script>
+async function login() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  try {
+    const user = await api('POST', '/auth/login', { username, password });
+    window.location.href = user.role === 'ADMIN' ? '/admin.html' : '/staff.html';
+  } catch (e) {
+    document.getElementById('err').textContent = e.message;
+  }
+}
+document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+// If already logged in, redirect
+api('GET', '/auth/me').then(u => { window.location.href = u.role === 'ADMIN' ? '/admin.html' : '/staff.html'; }).catch(() => {});
+</script>
+</body>
+</html>

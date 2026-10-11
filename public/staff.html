@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAHADIMSUM — Staff</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar"><h1 id="pageTitle" class="brand"><img src="/logo-mahadimsum.PNG" alt="MAHADIMSUM" class="brand-logo"><span id="pageTitleText">MAHADIMSUM</span></h1><button class="secondary" style="padding:6px 10px;" onclick="logout()">Keluar</button></header>
+  <main id="view"></main>
+  <div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;" onclick="closeModal(event)">
+    <div style="background:#fff;max-width:420px;margin:60px auto;border-radius:14px;padding:16px;max-height:75vh;overflow:auto;" onclick="event.stopPropagation()">
+      <div id="modalBody"></div>
+      <button class="secondary" id="modalCloseBtn" style="margin-top:10px;width:100%;" onclick="closeModal()">Tutup</button>
+    </div>
+  </div>
+  <nav class="nav">
+    <a href="#home" data-tab="home">🏠<br>Home</a>
+    <a href="#kasir" data-tab="kasir">🧾<br>Kasir</a>
+    <a href="#riwayat" data-tab="riwayat">📜<br>Riwayat</a>
+    <a href="#absen" data-tab="absen">📍<br>Absen</a>
+    <a href="#jadwal" data-tab="jadwal">📅<br>Jadwal</a>
+    <a href="#profile" data-tab="profile">👤<br>Profile</a>
+  </nav>
+</div>
+<script src="dialog.js"></script>
+<script src="api.js"></script>
+<script>
+// Operational calendar is always Jakarta/WIB, regardless of the device timezone.
+function jakartaISODate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const part = type => parts.find(p => p.type === type).value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+function closeModal() { if (window.qrisPaymentModalActive) return; document.getElementById('modalOverlay').style.display = 'none'; }
+async function showTrxDetail(id) {
+  const trx = await api('GET', `/pos/transactions/${id}`);
+  const tagClass = s => s==='PAID'?'paid':s==='VOID'?'void':'pending';
+  document.getElementById('modalBody').innerHTML = `
+    <h3>${trx.trx_no}</h3>
+    <p class="muted">${trx.date} ${trx.time} — <span class="tag ${tagClass(trx.payment_status)}">${trx.payment_status}</span> — ${trx.payment_method}</p>
+    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity)}</td></tr>`).join('')}</table>
+    <div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(trx.grand_total)}</span></div>
+    ${trx.payment_method==='CASH'?`<div class="cart-row"><span>Dibayar</span><span>${rupiah(trx.paid_amount)}</span></div><div class="cart-row"><span>Kembalian</span><span>${rupiah(trx.change_amount)}</span></div>`:''}
+  `;
+  document.getElementById('modalOverlay').style.display = 'block';
+}
+let me = null;
+let menuList = [];
+let cart = []; // {menu, qty, notes}
+
+async function logout() { await api('POST', '/auth/logout'); window.location.href = '/index.html'; }
+
+function setPageTitle(title) { document.getElementById('pageTitleText').textContent = title; }
+
+function setActiveTab(tab) {
+  document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
+}
+
+async function renderHome() {
+  setPageTitle('MAHADIMSUM');
+  const dash = await api('GET', '/admin/dashboard').catch(() => null);
+  const salesToday = dash ? rupiah(dash.salesToday.total) : '-';
+  document.getElementById('view').innerHTML = `
+    <div class="card center">
+      <div class="muted">Penjualan Hari Ini</div>
+      <div class="kpi"><div class="value">${salesToday}</div></div>
+    </div>
+    <button class="big" onclick="location.hash='absen'">📍 ABSEN</button>
+    <button class="big" onclick="location.hash='kasir'">🧾 KASIR</button>
+    <button class="big secondary" onclick="location.hash='jadwal'">📅 JADWAL</button>
+  `;
+}
+
+async function renderKasir() {
+  setPageTitle('Kasir');
+  if (!menuList.length) menuList = await api('GET', '/pos/menu-active');
+  const grouped = {};
+  for (const m of menuList) { (grouped[m.category || 'Lainnya'] ??= []).push(m); }
+
+  let html = '<div class="card"><h3>Pilih Menu</h3>';
+  for (const [cat, items] of Object.entries(grouped)) {
+    html += `<div class="muted" style="margin-top:8px;font-weight:600;">${cat}</div>`;
+    for (const m of items) {
+      const inCart = cart.find(c => c.menu.id === m.id);
+      html += `<div class="menu-item">
+        <div>${m.name}<br><span class="muted">${rupiah(m.price)}</span></div>
+        <div class="qty-ctrl">
+          <button onclick="changeQty(${m.id},-1)">−</button>
+          <span>${inCart ? inCart.qty : 0}</span>
+          <button onclick="changeQty(${m.id},1)">+</button>
+        </div>
+      </div>`;
+    }
+  }
+  html += '</div>';
+
+  if (cart.length) {
+    const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty, 0);
+    html += `<div class="card"><h3>Review Cart</h3>`;
+    for (const c of cart) html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price * c.qty)}</span></div>`;
+    html += `<div class="cart-row" style="font-weight:700;margin-top:6px;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(subtotal)}</span></div>
+      <textarea id="notes" placeholder="Catatan (opsional): tidak pedas, saus dipisah, dll"></textarea>
+      <div class="grid2">
+        <button onclick="pay('CASH')">💵 Cash</button>
+        <button onclick="pay('QRIS')">📱 QRIS</button>
+      </div>
+      <div id="payErr" class="error"></div>
+    </div>`;
+  }
+  document.getElementById('view').innerHTML = html;
+}
+
+function changeQty(menuId, delta) {
+  // PostgreSQL BIGINT values are commonly returned as strings; inline onclick IDs are numbers.
+  // Compare IDs as strings so the +/− controls work for both admin and staff datasets.
+  const menu = menuList.find(m => String(m.id) === String(menuId));
+  if (!menu) {
+    const view = document.getElementById('view');
+    if (view) view.insertAdjacentHTML('afterbegin', '<p class="error">Menu tidak ditemukan. Muat ulang halaman Kasir.</p>');
+    return;
+  }
+  let entry = cart.find(c => String(c.menu.id) === String(menuId));
+  if (!entry) { if (delta > 0) cart.push({ menu, qty: 1 }); }
+  else { entry.qty += delta; if (entry.qty <= 0) cart = cart.filter(c => String(c.menu.id) !== String(menuId)); }
+  renderKasir();
+}
+
+async function pay(method) {
+  const notes = document.getElementById('notes')?.value || '';
+  const items = cart.map(c => ({ menu_id: c.menu.id, quantity: c.qty, notes: notes || undefined }));
+  const idempotencyKey = 'trx-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty, 0);
+  let payment = { method };
+  if (method === 'CASH') {
+    const paid = await promptCashPayment(subtotal);
+    if (paid == null) return;
+    payment.paid_amount = paid;
+  }
+  try {
+    const result = await api('POST', '/pos/checkout', { items, payment, idempotencyKey });
+    cart = [];
+    if (method === 'QRIS' && result.transaction.payment_status === 'PENDING') {
+      renderKasir();
+      const finalTrx = await payWithQris(result.transaction.id, result.transaction.trx_no, result.transaction.grand_total);
+      if (finalTrx) await alertDialog(`Transaksi ${finalTrx.trx_no} berhasil dibayar via QRIS.`);
+      return;
+    }
+    await alertDialog(`Transaksi ${result.transaction.trx_no} berhasil (${result.transaction.payment_status}).` +
+      (method === 'CASH' ? ` Kembalian: ${rupiah(result.transaction.change_amount)}` : ''));
+    renderKasir();
+  } catch (e) {
+    document.getElementById('payErr').textContent = e.message;
+  }
+}
+
+let riwayatFilters = { from: '', to: '', paymentMethod: '', paymentStatus: '' };
+async function renderRiwayat() {
+  setPageTitle('Riwayat Transaksi');
+  const query = new URLSearchParams();
+  if (riwayatFilters.from && riwayatFilters.to) { query.set('from', riwayatFilters.from); query.set('to', riwayatFilters.to); }
+  if (riwayatFilters.paymentMethod) query.set('paymentMethod', riwayatFilters.paymentMethod);
+  if (riwayatFilters.paymentStatus) query.set('paymentStatus', riwayatFilters.paymentStatus);
+  const { rows: trx, summary } = await api('GET', `/pos/transactions?${query.toString()}`);
+  const tagClass = s => s==='PAID'?'paid':s==='VOID'?'void':'pending';
+  const exportUrl = `/api/pos/transactions/export?${query.toString()}`;
+  let html = `<div class="card">
+    <label>Dari</label><input id="rwFrom" type="date" value="${riwayatFilters.from}">
+    <label>Sampai</label><input id="rwTo" type="date" value="${riwayatFilters.to}">
+    <select id="rwMethod">
+      <option value="">Semua Metode</option>
+      <option value="CASH" ${riwayatFilters.paymentMethod==='CASH'?'selected':''}>Cash</option>
+      <option value="QRIS" ${riwayatFilters.paymentMethod==='QRIS'?'selected':''}>QRIS</option>
+    </select>
+    <select id="rwStatus">
+      <option value="">Semua Status</option>
+      <option value="PAID" ${riwayatFilters.paymentStatus==='PAID'?'selected':''}>PAID</option>
+      <option value="PENDING" ${riwayatFilters.paymentStatus==='PENDING'?'selected':''}>PENDING</option>
+      <option value="VOID" ${riwayatFilters.paymentStatus==='VOID'?'selected':''}>VOID</option>
+    </select>
+    <button onclick="applyRiwayatFilters()">Terapkan Filter</button>
+    <a class="btn" style="text-decoration:none;display:inline-block;margin-top:8px;" href="${exportUrl}" target="_blank">⬇ Download Excel</a>
+  </div>`;
+  html += '<div class="card"><table><tr><th>No</th><th>Tanggal</th><th>Total</th><th>Status</th></tr>';
+  for (const t of trx) {
+    html += `<tr onclick="showTrxDetail(${t.id})" style="cursor:pointer;">
+      <td>${t.trx_no}</td><td>${t.date} ${t.time}</td><td>${rupiah(t.grand_total)}</td>
+      <td><span class="tag ${tagClass(t.payment_status)}">${t.payment_status}</span></td></tr>`;
+  }
+  if (!trx.length) html += '<tr><td colspan="4" class="muted">Belum ada transaksi.</td></tr>';
+  html += `<tr style="font-weight:700;border-top:2px solid #ddd;"><td colspan="2">TOTAL PENDAPATAN (PAID)</td><td>${rupiah(summary.totalRevenue)}</td><td></td></tr>`;
+  html += '</table></div>';
+  document.getElementById('view').innerHTML = html;
+}
+function applyRiwayatFilters() {
+  riwayatFilters.from = document.getElementById('rwFrom').value;
+  riwayatFilters.to = document.getElementById('rwTo').value;
+  riwayatFilters.paymentMethod = document.getElementById('rwMethod').value;
+  riwayatFilters.paymentStatus = document.getElementById('rwStatus').value;
+  renderRiwayat();
+}
+
+let stream = null;
+let cameraFacingMode = 'user';
+async function renderAbsen() {
+  setPageTitle('Absensi');
+  document.getElementById('view').innerHTML = `
+    <div class="card center">
+      <video id="cam" autoplay playsinline style="width:100%;border-radius:10px;background:#000;"></video>
+      <button type="button" class="secondary" style="width:100%;margin:8px 0;" onclick="flipAttendanceCamera()">🔄 Ganti Kamera Depan / Belakang</button>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <div id="gpsStatus" class="muted" style="margin:8px 0;">Mengambil lokasi GPS...</div>
+      <textarea id="absenNote" placeholder="Catatan (opsional): izin telat, dll"></textarea>
+      <div class="grid2">
+        <button onclick="captureAndSubmit('in')">Check-in</button>
+        <button class="secondary" onclick="captureAndSubmit('out')">Check-out</button>
+      </div>
+      <div id="absenMsg" class="error"></div>
+    </div>`;
+  cameraFacingMode = 'user';
+  await startAttendanceCamera();
+}
+
+async function startAttendanceCamera() {
+  try {
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacingMode } } });
+    const video = document.getElementById('cam');
+    if (video) video.srcObject = stream;
+    const msg = document.getElementById('absenMsg');
+    if (msg && msg.textContent.includes('kamera')) msg.textContent = '';
+  } catch (e) {
+    const msg = document.getElementById('absenMsg');
+    if (msg) msg.textContent = 'Kamera tidak dapat dibuka. Pastikan permission kamera telah diberikan.';
+  }
+}
+
+async function flipAttendanceCamera() {
+  cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+  await startAttendanceCamera();
+}
+
+function getGps() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => { document.getElementById('gpsStatus').textContent = 'GPS aktif ✓'; resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }); },
+      () => { document.getElementById('gpsStatus').textContent = 'GPS tidak tersedia.'; resolve(null); },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  });
+}
+
+async function captureAndSubmit(kind) {
+  const video = document.getElementById('cam');
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth || 320; canvas.height = video.videoHeight || 240;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  const photo = canvas.toDataURL('image/jpeg', 0.6);
+  const note = document.getElementById('absenNote')?.value || undefined;
+  const gps = await getGps();
+  if (!gps) { document.getElementById('absenMsg').textContent = 'Pastikan Location/GPS aktif lalu coba kembali.'; return; }
+  try {
+    await api('POST', `/attendance/check-${kind}`, { lat: gps.lat, lng: gps.lng, photo, note });
+    document.getElementById('absenMsg').style.color = 'green';
+    document.getElementById('absenMsg').textContent = kind === 'in' ? 'Check-in berhasil!' : 'Check-out berhasil!';
+  } catch (e) {
+    document.getElementById('absenMsg').style.color = '';
+    document.getElementById('absenMsg').textContent = e.message;
+  }
+}
+
+async function renderJadwal() {
+  setPageTitle('Jadwal');
+  const schedule = await api('GET', '/attendance/schedule');
+  const days = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+  let html = '<div class="card"><table><tr><th>Hari</th><th>Karyawan</th><th>Fokus</th></tr>';
+  for (const s of schedule.sort((a,b)=>a.day_of_week-b.day_of_week)) {
+    html += `<tr><td>${days[s.day_of_week]}</td><td>${s.employee_name}</td><td>${s.focus}</td></tr>`;
+  }
+  html += '</table></div>';
+  document.getElementById('view').innerHTML = html;
+}
+
+async function renderProfile() {
+  setPageTitle('Profile');
+  const [mineAll, payslips] = await Promise.all([
+    api('GET', '/attendance/mine').catch(() => []),
+    api('GET', '/admin/payroll/mine').catch(() => []),
+  ]);
+
+  // Riwayat absensi hanya menampilkan bulan berjalan — otomatis "hilang dari
+  // tampilan" begitu bulan berganti, karena filter ini selalu memakai bulan saat ini.
+  const currentMonthPrefix = jakartaISODate().slice(0, 7); // YYYY-MM
+  const mine = mineAll.filter(a => a.date.startsWith(currentMonthPrefix));
+
+  let html = `<div class="card"><h3>${me.username}</h3><p class="muted">${me.role}</p></div>`;
+
+  html += `<div class="card"><h3>Riwayat Absensi (Bulan Ini)</h3><table><tr><th>Tanggal</th><th>In</th><th>Out</th><th>Status</th></tr>`;
+  for (const a of mine) html += `<tr><td>${a.date}</td><td>${a.check_in||'-'}</td><td>${a.check_out||'-'}</td><td>${a.status}</td></tr>`;
+  if (!mine.length) html += '<tr><td colspan="4" class="muted">Belum ada absensi bulan ini.</td></tr>';
+  html += '</table></div>';
+
+  html += `<div class="card"><h3>Payslip</h3>
+    <p class="muted" style="font-size:12px;">Hanya menampilkan payslip yang sudah di-approve admin. Payslip tahun sebelumnya otomatis terhapus saat tahun berganti.</p>
+    <table><tr><th>Periode</th><th>Status</th><th>Net Pay</th><th></th></tr>`;
+  for (const p of payslips) {
+    html += `<tr><td>${p.period_start} s/d ${p.period_end}</td><td>${p.status}</td><td>${rupiah(p.net_pay)}</td>
+      <td><a class="btn" style="padding:4px 8px;text-decoration:none;display:inline-block;" href="/api/admin/payroll/${p.id}/payslip" target="_blank">⬇ PDF</a></td></tr>`;
+  }
+  if (!payslips.length) html += '<tr><td colspan="4" class="muted">Belum ada payslip yang di-approve.</td></tr>';
+  html += '</table></div>';
+
+  document.getElementById('view').innerHTML = html;
+}
+
+function stopCamIfNeeded() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
+
+async function route() {
+  stopCamIfNeeded();
+  const tab = (location.hash || '#home').slice(1);
+  setActiveTab(tab);
+  if (tab === 'home') await renderHome();
+  else if (tab === 'kasir') await renderKasir();
+  else if (tab === 'riwayat') await renderRiwayat();
+  else if (tab === 'absen') await renderAbsen();
+  else if (tab === 'jadwal') await renderJadwal();
+  else if (tab === 'profile') await renderProfile();
+}
+window.addEventListener('hashchange', route);
+
+(async () => {
+  me = await requireSession(['STAFF', 'ADMIN']);
+  if (me) route();
+})();
+</script>
+</body>
+</html>
