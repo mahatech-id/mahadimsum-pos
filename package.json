@@ -1,0 +1,28 @@
+{
+  "name": "mahadimsum",
+  "version": "1.0.0",
+  "description": "MAHADIMSUM POS using Supabase PostgreSQL",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node seed/seed.js",
+    "test": "node tests/static-checks.js && node tests/overtime-policy.js",
+    "test:qris": "node tests/qris-tests.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dayjs": "^1.11.23",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "pdfkit": "^0.20.2",
+    "uuid": "^14.0.2",
+    "pg-native": "^3.9.0"
+  }
+}
