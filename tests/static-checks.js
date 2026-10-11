@@ -96,3 +96,7 @@ if (!serverSource.startsWith("// Keep all server-side operational dates/times (P
   throw new Error('POS and attendance operational dates must use Asia/Jakarta (WIB), independent of host/device timezone.');
 }
 console.log('PASS Jakarta/WIB current date and time configuration for server, POS, admin, and staff.');
+if (!adminHtml.includes('function formatJakartaDateTime(value)') || !adminHtml.includes("timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',") || !adminHtml.includes('${formatJakartaDateTime(l.timestamp)}') || !adminHtml.includes('Tanggal &amp; Jam (WIB)')) {
+  throw new Error('Audit log timestamps must be converted from database UTC to Asia/Jakarta (WIB) for display.');
+}
+console.log('PASS audit log UTC timestamp formatting to WIB.');
