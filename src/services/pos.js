@@ -1,0 +1,166 @@
+const { db, getSetting } = require('../db');
+const dayjs = require('dayjs');
+const { getActiveRecipe, checkSufficientStock, deductForSale, restoreForVoid } = require('./inventory');
+const { logAudit } = require('./audit');
+
+function nextTrxNo() {
+  const today = dayjs().format('YYYYMMDD');
+  const row = db.prepare(`SELECT COUNT(*) as c FROM transactions WHERE trx_no LIKE ?`).get(`TRX-${today}-%`);
+  const seq = String(row.c + 1).padStart(4, '0');
+  return `TRX-${today}-${seq}`;
+}
+
+const insertTrx = db.prepare(`INSERT INTO transactions
+  (trx_no, date, time, cashier_id, subtotal, discount, grand_total, payment_method,
+   paid_amount, change_amount, qris_reference, payment_status, type, manual_entry, idempotency_key)
+  VALUES (@trx_no,@date,@time,@cashier_id,@subtotal,@discount,@grand_total,@payment_method,
+   @paid_amount,@change_amount,@qris_reference,@payment_status,@type,@manual_entry,@idempotency_key)`);
+
+const insertItem = db.prepare(`INSERT INTO transaction_items
+  (transaction_id, menu_id, recipe_id, quantity, price, notes)
+  VALUES (@transaction_id,@menu_id,@recipe_id,@quantity,@price,@notes)`);
+
+const getMenu = db.prepare('SELECT * FROM menu WHERE id = ?');
+const getTrxByIdem = db.prepare('SELECT * FROM transactions WHERE idempotency_key = ?');
+
+/**
+ * Create + pay a transaction atomically.
+ * items: [{ menu_id, quantity, notes }]
+ * payment: { method: 'CASH'|'QRIS', paid_amount?, qris_reference?, status? }
+ * transactionDate/transactionTime: optional override (for MANUAL back/forward-dated entries).
+ * Rejects if stock insufficient, unless actor has ALLOW_NEGATIVE_STOCK.
+ * Rejects CASH payment if paid_amount is less than grand total.
+ */
+function createTransaction({ items, payment, cashierId, type = 'POS', discount = 0, idempotencyKey, allowNegativeStock = false, transactionDate, transactionTime }) {
+  if (idempotencyKey) {
+    const existing = getTrxByIdem.get(idempotencyKey);
+    if (existing) return { transaction: existing, idempotent: true };
+  }
+  if (!items || !items.length) throw new Error('Transaksi harus memiliki minimal 1 item.');
+
+  const run = db.transaction(() => {
+    // Resolve recipe + price for each item, pinned at sale time (recipe versioning)
+    const resolved = items.map(it => {
+      const menu = getMenu.get(it.menu_id);
+      if (!menu || !menu.active) throw new Error(`Menu ${it.menu_id} tidak tersedia.`);
+      const recipe = getActiveRecipe(menu.id);
+      return { menu, recipe, quantity: it.quantity, notes: it.notes || null };
+    });
+
+    // Stock sufficiency check BEFORE any mutation (unless negative stock allowed)
+    if (!allowNegativeStock) {
+      for (const r of resolved) {
+        if (!r.recipe) continue;
+        const shortages = checkSufficientStock(r.recipe.id, r.quantity);
+        if (shortages.length) {
+          const s = shortages[0];
+          const err = new Error(`Stock ${s.item} tidak mencukupi.`);
+          err.code = 'INSUFFICIENT_STOCK';
+          err.shortages = shortages;
+          throw err;
+        }
+      }
+    }
+
+    const subtotal = resolved.reduce((s, r) => s + r.menu.price * r.quantity, 0);
+    const grandTotal = subtotal - (discount || 0);
+    const status = payment.status || (payment.method === 'CASH' ? 'PAID' : 'PENDING');
+
+    // Cash payment validation: paid amount must cover the grand total
+    if (payment.method === 'CASH' && status === 'PAID') {
+      const paid = Number(payment.paid_amount);
+      if (!Number.isFinite(paid) || paid < grandTotal) {
+        const err = new Error(`Nominal cash (${paid || 0}) tidak boleh kurang dari total tagihan (${grandTotal}).`);
+        err.code = 'INSUFFICIENT_PAYMENT';
+        throw err;
+      }
+    }
+
+    const trxNo = nextTrxNo();
+    const now = dayjs();
+    const dateStr = transactionDate || now.format('YYYY-MM-DD');
+    const timeStr = transactionTime || now.format('HH:mm:ss');
+    const info = insertTrx.run({
+      trx_no: trxNo,
+      date: dateStr,
+      time: timeStr,
+      cashier_id: cashierId || null,
+      subtotal, discount: discount || 0, grand_total: grandTotal,
+      payment_method: payment.method,
+      paid_amount: payment.paid_amount ?? null,
+      change_amount: payment.method === 'CASH' ? (payment.paid_amount - grandTotal) : null,
+      qris_reference: payment.qris_reference || null,
+      payment_status: status,
+      type,
+      manual_entry: type === 'MANUAL' ? 1 : 0,
+      idempotency_key: idempotencyKey || null,
+    });
+    const trxId = info.lastInsertRowid;
+
+    for (const r of resolved) {
+      insertItem.run({
+        transaction_id: trxId, menu_id: r.menu.id, recipe_id: r.recipe ? r.recipe.id : null,
+        quantity: r.quantity, price: r.menu.price, notes: r.notes,
+      });
+      // Deduct stock only when transaction becomes PAID (Section 12)
+      if (status === 'PAID' && r.recipe) {
+        deductForSale({
+          recipeId: r.recipe.id, qtySold: r.quantity, referenceId: trxNo,
+          actorId: cashierId, allowNegative: allowNegativeStock,
+        });
+      }
+    }
+
+    logAudit({ actorId: cashierId, action: 'CREATE', module: 'transactions', recordId: trxId, newValue: { trxNo, grandTotal, status } });
+    return db.prepare('SELECT * FROM transactions WHERE id = ?').get(trxId);
+  });
+
+  const transaction = run();
+  return { transaction, idempotent: false };
+}
+
+/** Mark a PENDING QRIS transaction as PAID (deducts stock now) or FAILED/CANCELLED. */
+function updateQrisStatus({ transactionId, status, qrisReference, actorId }) {
+  const trx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(transactionId);
+  if (!trx) throw new Error('Transaksi tidak ditemukan.');
+  if (trx.payment_status !== 'PENDING') throw new Error('Transaksi ini sudah difinalisasi.');
+
+  const run = db.transaction(() => {
+    db.prepare('UPDATE transactions SET payment_status = ?, qris_reference = COALESCE(?, qris_reference) WHERE id = ?')
+      .run(status, qrisReference, transactionId);
+    if (status === 'PAID') {
+      const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
+      for (const it of items) {
+        if (it.recipe_id) {
+          deductForSale({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+        }
+      }
+    }
+    logAudit({ actorId, action: 'UPDATE', module: 'transactions', recordId: transactionId, oldValue: { status: trx.payment_status }, newValue: { status } });
+  });
+  run();
+  return db.prepare('SELECT * FROM transactions WHERE id = ?').get(transactionId);
+}
+
+/** Void a PAID transaction: restores stock, marks VOID. Idempotent (can't double-void). */
+function voidTransaction({ transactionId, actorId, reason }) {
+  const trx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(transactionId);
+  if (!trx) throw new Error('Transaksi tidak ditemukan.');
+  if (trx.payment_status === 'VOID') return trx; // idempotent no-op
+  if (trx.payment_status !== 'PAID') throw new Error('Hanya transaksi PAID yang dapat di-void.');
+
+  const run = db.transaction(() => {
+    const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
+    for (const it of items) {
+      if (it.recipe_id) {
+        restoreForVoid({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+      }
+    }
+    db.prepare('UPDATE transactions SET payment_status = ? WHERE id = ?').run('VOID', transactionId);
+    logAudit({ actorId, action: 'VOID', module: 'transactions', recordId: transactionId, oldValue: { status: 'PAID' }, newValue: { status: 'VOID', reason } });
+  });
+  run();
+  return db.prepare('SELECT * FROM transactions WHERE id = ?').get(transactionId);
+}
+
+module.exports = { createTransaction, updateQrisStatus, voidTransaction };
