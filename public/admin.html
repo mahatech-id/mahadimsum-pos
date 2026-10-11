@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MAHADIMSUM — Admin</title>
+<link rel="icon" type="image/png" href="/logo-mahadimsum.PNG?v=1">
+<link rel="apple-touch-icon" href="/logo-mahadimsum.PNG?v=1">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -52,6 +54,25 @@ function jakartaISODate(date = new Date()) {
   }).formatToParts(date);
   const part = type => parts.find(p => p.type === type).value;
   return `${part('year')}-${part('month')}-${part('day')}`;
+}
+// Database audit timestamps are stored in UTC (PostgreSQL/SQLite CURRENT_TIMESTAMP).
+// Render them as WIB explicitly so the display does not depend on the browser timezone.
+function formatJakartaDateTime(value) {
+  if (!value) return '-';
+  let raw = String(value).trim();
+  if (!raw) return '-';
+  let normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  // PostgreSQL may emit offsets as +00; normalize them to ISO's +00:00 form.
+  normalized = normalized.replace(/([+-]\d{2})$/, '$1:00');
+  // Legacy/default DB timestamp strings can omit an offset; CURRENT_TIMESTAMP is UTC.
+  const hasExplicitZone = /T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  if (!hasExplicitZone) normalized += 'Z';
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) return String(value);
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).format(parsed);
 }
 function closeModal() { if (window.qrisPaymentModalActive) return; document.getElementById('modalOverlay').style.display = 'none'; }
 async function showTrxDetail(id) {
@@ -805,8 +826,8 @@ async function saveSetting(key) {
 async function renderAudit() {
   const logs = await api('GET','/admin/audit-log');
   document.getElementById('view').innerHTML = `<h2>Audit Log</h2><div class="card"><table>
-    <tr><th>Waktu</th><th>Actor</th><th>Action</th><th>Module</th><th>Record</th></tr>
-    ${logs.map(l=>`<tr><td>${l.timestamp}</td><td>${l.actor_id||'-'}</td><td>${l.action}</td><td>${l.module}</td><td>${l.record_id||'-'}</td></tr>`).join('')}
+    <tr><th>Tanggal &amp; Jam (WIB)</th><th>Actor</th><th>Action</th><th>Module</th><th>Record</th></tr>
+    ${logs.map(l=>`<tr><td>${formatJakartaDateTime(l.timestamp)}</td><td>${l.actor_id||'-'}</td><td>${l.action}</td><td>${l.module}</td><td>${l.record_id||'-'}</td></tr>`).join('')}
     </table></div>`;
 }
 
