@@ -267,11 +267,13 @@ router.get('/transactions/:id', requirePermission('transactions.view'), (req, re
   }
   const items = db.prepare(`SELECT ti.*, m.name as menu_name FROM transaction_items ti
     JOIN menu m ON m.id = ti.menu_id WHERE ti.transaction_id = ?`).all(req.params.id);
-  res.json({ ...trx, items });
+  const itemsWithAddons = items.map(item => ({ ...item, addons: db.prepare('SELECT * FROM transaction_item_addons WHERE transaction_item_id=? ORDER BY addon_name').all(item.id) }));
+  res.json({ ...trx, items: itemsWithAddons });
 });
 
 router.get('/menu-active', requirePermission('pos.use'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM menu WHERE active = 1 ORDER BY category, name').all());
+  const menus = db.prepare('SELECT * FROM menu WHERE active = 1 ORDER BY category, name').all();
+  res.json(menus.map(m => ({ ...m, addons: db.prepare(`SELECT a.id, a.name, a.price, a.quantity_per_addon, a.unit, a.inventory_item_id FROM addons a JOIN menu_addons ma ON ma.addon_id=a.id WHERE ma.menu_id=? AND a.active=1 ORDER BY a.name`).all(m.id) })));
 });
 
 // Lightweight cashier list for the transaction filter dropdown (admin-like users only)
