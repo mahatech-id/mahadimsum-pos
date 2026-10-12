@@ -127,6 +127,48 @@ db.exec(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_expires_at TEXT;
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_paid_at TEXT;
 `);
+// Add-on catalog, per-menu eligibility, and transaction-time snapshots.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS addons (
+    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+    inventory_item_id BIGINT NOT NULL REFERENCES inventory_items(id),
+    price DOUBLE PRECISION NOT NULL DEFAULT 2000,
+    quantity_per_addon DOUBLE PRECISION NOT NULL DEFAULT 1,
+    unit TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE IF NOT EXISTS menu_addons (
+    menu_id BIGINT NOT NULL REFERENCES menu(id), addon_id BIGINT NOT NULL REFERENCES addons(id),
+    PRIMARY KEY (menu_id, addon_id)
+  );
+  CREATE TABLE IF NOT EXISTS transaction_item_addons (
+    id BIGSERIAL PRIMARY KEY, transaction_item_id BIGINT NOT NULL REFERENCES transaction_items(id),
+    addon_id BIGINT REFERENCES addons(id), addon_name TEXT NOT NULL, quantity INTEGER NOT NULL,
+    unit_price DOUBLE PRECISION NOT NULL, inventory_item_id BIGINT REFERENCES inventory_items(id),
+    quantity_per_addon DOUBLE PRECISION NOT NULL DEFAULT 1, unit TEXT NOT NULL
+  );
+`);
+
+  // Seed the four standard Add Ons from inventory formulas; associate new defaults with all active menus.
+  const addonDefaults = [
+    { name: 'Mozzarella', inventoryName: 'Keju Mozzarella', quantity: 1, price: 2000 },
+    { name: 'Nori', inventoryName: 'Nori', quantity: 1, price: 2000 },
+    { name: 'Saus Pedas', inventoryName: 'Saus Pedas', quantity: 0.015, price: 2000 },
+    { name: 'Chili Oil', inventoryName: 'Chili Oil', quantity: 15, price: 2000 },
+  ];
+  for (const a of addonDefaults) {
+    const inventory = db.prepare('SELECT * FROM inventory_items WHERE LOWER(name)=LOWER(?) AND active=1').get(a.inventoryName);
+    if (!inventory) continue;
+    let addon = db.prepare('SELECT * FROM addons WHERE LOWER(name)=LOWER(?)').get(a.name);
+    if (!addon) {
+      const info = db.prepare('INSERT INTO addons (name, inventory_item_id, price, quantity_per_addon, unit, active) VALUES (?,?,?,?,?,1)')
+        .run(a.name, inventory.id, a.price, a.quantity, inventory.unit);
+      addon = db.prepare('SELECT * FROM addons WHERE id=?').get(info.lastInsertRowid);
+      for (const menu of db.prepare('SELECT id FROM menu WHERE active=1').all()) {
+        db.prepare('INSERT INTO menu_addons (menu_id, addon_id) VALUES (?,?) ON CONFLICT DO NOTHING').run(menu.id, addon.id);
+      }
+    }
+  }
+
 // Create this index only after the additive migration above, so older Supabase
 // projects whose utilities table predates payroll_id can start safely.
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_utilities_payroll_recovery ON utilities(payroll_id) WHERE payroll_id IS NOT NULL');

@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS recipe_items (
   quantity DOUBLE PRECISION NOT NULL,
   unit TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS addons (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  inventory_item_id BIGINT NOT NULL REFERENCES inventory_items(id),
+  price DOUBLE PRECISION NOT NULL DEFAULT 2000,
+  quantity_per_addon DOUBLE PRECISION NOT NULL DEFAULT 1,
+  unit TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS menu_addons (
+  menu_id BIGINT NOT NULL REFERENCES menu(id),
+  addon_id BIGINT NOT NULL REFERENCES addons(id),
+  PRIMARY KEY (menu_id, addon_id)
+);
 CREATE TABLE IF NOT EXISTS transactions (
   id BIGSERIAL PRIMARY KEY,
   trx_no TEXT UNIQUE NOT NULL,
@@ -109,6 +123,17 @@ CREATE TABLE IF NOT EXISTS transaction_items (
   quantity INTEGER NOT NULL,
   price DOUBLE PRECISION NOT NULL,
   notes TEXT
+);
+CREATE TABLE IF NOT EXISTS transaction_item_addons (
+  id BIGSERIAL PRIMARY KEY,
+  transaction_item_id BIGINT NOT NULL REFERENCES transaction_items(id),
+  addon_id BIGINT REFERENCES addons(id),
+  addon_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  unit_price DOUBLE PRECISION NOT NULL,
+  inventory_item_id BIGINT REFERENCES inventory_items(id),
+  quantity_per_addon DOUBLE PRECISION NOT NULL DEFAULT 1,
+  unit TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS stock_movements (
   id BIGSERIAL PRIMARY KEY,
