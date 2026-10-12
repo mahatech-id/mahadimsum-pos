@@ -161,7 +161,7 @@ function applyDashFilter() {
 }
 
 // ---------------- POS (Admin can also transact / manual entry) ----------------
-let menuList = [], cart = [];
+let menuList = [], cart = [], adminPosNotes = '';
 async function renderPos() {
   if (!menuList.length) menuList = await api('GET', '/pos/menu-active');
   let html = '<h2>POS</h2><div class="grid2"><div class="card"><h3>Menu</h3>';
@@ -174,6 +174,7 @@ async function renderPos() {
   const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
   for (const c of cart) html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price*c.qty)}</span></div>`;
   html += `<div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(subtotal)}</span></div>
+    <label for="adminPosNotes">Catatan (opsional)</label><textarea id="adminPosNotes" placeholder="Catatan (opsional): tidak pedas, saus dipisah, dll" oninput="adminPosNotes=this.value">${String(adminPosNotes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
     <div class="grid2"><button onclick="posPay('CASH')">Cash</button><button onclick="posPay('QRIS')">QRIS</button></div>
     <button class="secondary" style="margin-top:8px;" onclick="posManual()">Input Transaksi Manual</button>
     <button class="secondary" style="margin-top:8px;" onclick="openBulkManualTrx()">Upload Bulk Transaksi Manual (Excel)</button>
@@ -195,7 +196,7 @@ function posQty(id, delta) {
   renderPos();
 }
 async function posPay(method) {
-  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty}));
+  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, notes: adminPosNotes.trim() || undefined}));
   const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
   let payment = { method };
   if (method === 'CASH') {
@@ -207,7 +208,7 @@ async function posPay(method) {
   }
   try {
     const r = await api('POST','/pos/checkout', { items, payment, idempotencyKey: 'admin-'+Date.now() });
-    cart = [];
+    cart = []; adminPosNotes = '';
     if (method === 'QRIS' && r.transaction.payment_status === 'PENDING') {
       renderPos();
       const finalTrx = await payWithQris(r.transaction.id, r.transaction.trx_no, r.transaction.grand_total);
@@ -218,7 +219,7 @@ async function posPay(method) {
   } catch(e) { document.getElementById('posErr').textContent = e.message; }
 }
 async function posManual() {
-  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty}));
+  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, notes: adminPosNotes.trim() || undefined}));
   if (!items.length) return alertDialog('Tambahkan item dulu.');
   const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
   const today = jakartaISODate();
@@ -236,7 +237,7 @@ async function posManual() {
   }
   try {
     const trx = await api('POST','/pos/manual', { items, payment, transactionDate: form.transactionDate || undefined });
-    cart = []; await alertDialog(`Manual transaction ${trx.trx_no} tercatat (tanggal ${trx.date}).`); renderPos();
+    cart = []; adminPosNotes = ''; await alertDialog(`Manual transaction ${trx.trx_no} tercatat (tanggal ${trx.date}).`); renderPos();
   } catch(e) { document.getElementById('posErr').textContent = e.message; }
 }
 async function openBulkManualTrx() {
@@ -561,6 +562,15 @@ async function delSchedule(id) { await api('DELETE', `/attendance/schedule/${id}
 
 // ---------------- Attendance (correction) ----------------
 let attendanceFilterEmployeeId = '';
+function formatWorkDuration(checkIn, checkOut) {
+  if (!checkIn || !checkOut) return '-';
+  const toMinutes = t => { const m = String(t).match(/(\d{1,2}):(\d{2})/); return m ? Number(m[1])*60+Number(m[2]) : NaN; };
+  const start = toMinutes(checkIn), endRaw = toMinutes(checkOut);
+  if (!Number.isFinite(start) || !Number.isFinite(endRaw)) return '-';
+  const end = endRaw < start ? endRaw + 1440 : endRaw;
+  const mins = Math.max(0, end - start);
+  return `${Math.floor(mins/60)} jam ${mins%60} menit`;
+}
 async function renderAttendance() {
   const emps = await api('GET', '/admin/employees');
   const query = attendanceFilterEmployeeId ? `?employeeId=${attendanceFilterEmployeeId}` : '';
@@ -576,15 +586,15 @@ async function renderAttendance() {
       <p class="muted" style="font-size:12px;margin-top:6px;">Riwayat attendance hanya disimpan untuk bulan berjalan — otomatis terhapus saat bulan berganti.</p>
     </div>
     <div class="card"><table>
-    <tr><th>Tanggal</th><th>Karyawan</th><th>Check-in</th><th>Check-out</th><th>Late (min)</th><th>OT (min)</th><th>Status</th><th>Foto</th><th>Aksi</th></tr>
-    ${rows.map(a=>`<tr><td>${a.date}</td><td>${a.employee_name||'-'}</td><td>${a.check_in||'-'}</td><td>${a.check_out||'-'}</td><td>${a.late_minutes}</td><td>${a.overtime_minutes}</td><td>${a.status}</td>
+    <tr><th>Tanggal</th><th>Karyawan</th><th>Check-in</th><th>Check-out</th><th>Total Jam Kerja</th><th>Late (min)</th><th>OT (min)</th><th>Status</th><th>Foto</th><th>Aksi</th></tr>
+    ${rows.map(a=>`<tr><td>${a.date}</td><td>${a.employee_name||'-'}</td><td>${a.check_in||'-'}</td><td>${a.check_out||'-'}</td><td>${formatWorkDuration(a.check_in,a.check_out)}</td><td>${a.late_minutes}</td><td>${a.overtime_minutes}</td><td>${a.status}</td>
       <td>
         ${a.check_in_photo?`<button class="secondary" style="padding:4px 8px;" onclick="viewAttendancePhoto('${a.check_in_photo}','Check-in')">In</button>`:''}
         ${a.check_out_photo?`<button class="secondary" style="padding:4px 8px;" onclick="viewAttendancePhoto('${a.check_out_photo}','Check-out')">Out</button>`:''}
         ${!a.check_in_photo && !a.check_out_photo?'-':''}
       </td>
       <td><button class="secondary" style="padding:4px 8px;" onclick="correctAtt(${a.id})">Koreksi</button></td></tr>`).join('')}
-    ${!rows.length ? '<tr><td colspan="9" class="muted">Belum ada data absensi.</td></tr>' : ''}
+    ${!rows.length ? '<tr><td colspan="10" class="muted">Belum ada data absensi.</td></tr>' : ''}
     </table></div>`;
 }
 function applyAttendanceFilter() {
@@ -715,7 +725,7 @@ async function computePayroll() {
       <tr><td>Meal</td><td>${rupiah(result.mealTotal)}</td></tr>
       <tr><td>Transport</td><td>${rupiah(result.transportTotal)}</td></tr>
       <tr><td>Bonus</td><td>${rupiah(result.bonusTotal)}</td></tr>
-      <tr><td>Overtime</td><td>${rupiah(result.overtimeTotal)}</td></tr>
+      <tr><td>Lembur (Overtime — ${Number(result.totalOvertimeMinutes || 0)} menit durasi)</td><td>${rupiah(result.overtimeTotal)}</td></tr>
       <tr><td>Potongan Keterlambatan</td><td>-${rupiah(result.lateDeductionTotal)}</td></tr>
       <tr><td>Potongan Utilities (kasbon/pengeluaran)</td><td>-${rupiah(result.utilitiesDeductionTotal)}</td></tr>
       <tr style="font-weight:700;"><td>Net Pay</td><td>${rupiah(result.netPay)}</td></tr>
