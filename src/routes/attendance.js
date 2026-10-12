@@ -11,7 +11,7 @@ router.post('/check-in', requirePermission('attendance.self'), (req, res) => {
   if (!employeeId) return res.status(400).json({ error: 'User ini tidak terhubung ke data karyawan.' });
   if (!photo) return res.status(400).json({ error: 'Pastikan permission kamera telah diberikan.' });
   try {
-    res.json(checkIn({ employeeId, lat, lng, photo, note }));
+    res.json(checkIn({ employeeId, actorId: req.session.userId, lat, lng, photo, note }));
   } catch (e) {
     res.status(400).json({ error: e.message, code: e.code });
   }
@@ -21,7 +21,7 @@ router.post('/check-out', requirePermission('attendance.self'), (req, res) => {
   const { lat, lng, photo, note } = req.body;
   const employeeId = req.session.employeeId;
   try {
-    res.json(checkOut({ employeeId, lat, lng, photo, note }));
+    res.json(checkOut({ employeeId, actorId: req.session.userId, lat, lng, photo, note }));
   } catch (e) {
     res.status(400).json({ error: e.message, code: e.code });
   }

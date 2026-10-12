@@ -307,7 +307,13 @@ router.put('/settings/:key', requirePermission('settings.manage'), (req, res) =>
 
 // ---- Audit log ----
 router.get('/audit-log', requirePermission('audit.view'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500').all());
+  // Resolve each activity to its user account and linked employee, including staff accounts.
+  res.json(db.prepare(`SELECT a.*, u.username AS actor_username, r.name AS actor_role, e.name AS actor_employee_name
+    FROM audit_log a
+    LEFT JOIN users u ON u.id = a.actor_id
+    LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN employees e ON e.id = u.employee_id
+    ORDER BY a.id DESC LIMIT 500`).all());
 });
 
 // ---- Dashboard KPIs (supports optional ?from=&to= date range filter) ----
