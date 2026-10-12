@@ -47,7 +47,7 @@ function withReturning(sql, kind) {
   const trimmed = sql.trim().replace(/;\s*$/, '');
   if (/\bRETURNING\b/i.test(trimmed)) return trimmed;
   // Key/value and join tables do not have a serial id column.
-  if (/\bsettings\b/i.test(trimmed) || /\brole_permissions\b/i.test(trimmed)) return trimmed;
+  if (/\bsettings\b/i.test(trimmed) || /\brole_permissions\b/i.test(trimmed) || /\bmenu_addons\b/i.test(trimmed)) return trimmed;
   if (kind === 'run-insert') return `${trimmed} RETURNING id`;
   if (kind === 'run-update') return `${trimmed} RETURNING id`;
   if (kind === 'run-delete') return `${trimmed} RETURNING id`;
