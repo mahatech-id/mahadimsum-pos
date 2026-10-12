@@ -1,6 +1,6 @@
 const { db, getSetting } = require('../db');
 const dayjs = require('dayjs');
-const { getActiveRecipe, checkSufficientStock, deductForSale, restoreForVoid } = require('./inventory');
+const { getActiveRecipe, checkSufficientStock, deductForSale, restoreForVoid, applyStockChange } = require('./inventory');
 const { logAudit } = require('./audit');
 
 function nextTrxNo() {
@@ -22,6 +22,13 @@ const insertItem = db.prepare(`INSERT INTO transaction_items
 
 const getMenu = db.prepare('SELECT * FROM menu WHERE id = ?');
 const getTrxByIdem = db.prepare('SELECT * FROM transactions WHERE idempotency_key = ?');
+const insertTrxAddon = db.prepare(`INSERT INTO transaction_item_addons (transaction_item_id, addon_id, addon_name, quantity, unit_price, inventory_item_id, quantity_per_addon, unit) VALUES (?,?,?,?,?,?,?,?)`);
+function deductItemAddons(itemId, referenceId, actorId, allowNegative = false) {
+  for (const a of db.prepare('SELECT * FROM transaction_item_addons WHERE transaction_item_id=?').all(itemId)) applyStockChange({ inventoryItemId:a.inventory_item_id, type:'SALE', quantity:-(a.quantity*a.quantity_per_addon), referenceId, note:`Add On ${a.addon_name} x${a.quantity}`, actorId, allowNegative });
+}
+function restoreItemAddons(itemId, referenceId, actorId) {
+  for (const a of db.prepare('SELECT * FROM transaction_item_addons WHERE transaction_item_id=?').all(itemId)) applyStockChange({ inventoryItemId:a.inventory_item_id, type:'RETURN', quantity:(a.quantity*a.quantity_per_addon), referenceId, note:`Void Add On ${a.addon_name} x${a.quantity}`, actorId, allowNegative:true });
+}
 
 /**
  * Create + pay a transaction atomically.
@@ -44,7 +51,16 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
       const menu = getMenu.get(it.menu_id);
       if (!menu || !menu.active) throw new Error(`Menu ${it.menu_id} tidak tersedia.`);
       const recipe = getActiveRecipe(menu.id);
-      return { menu, recipe, quantity: it.quantity, notes: it.notes || null };
+      const quantity = Number(it.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Quantity menu harus berupa bilangan bulat minimal 1.');
+      const requested = Array.isArray(it.addons) ? it.addons : [];
+      const addons = requested.filter(a => Number(a.quantity) > 0).map(a => {
+        const q = Number(a.quantity); if (!Number.isInteger(q) || q < 1 || q > 4) throw new Error('Qty setiap Add On maksimal 4.');
+        const addon = db.prepare(`SELECT a.* FROM addons a JOIN menu_addons ma ON ma.addon_id=a.id WHERE a.id=? AND ma.menu_id=? AND a.active=1`).get(a.addon_id, menu.id);
+        if (!addon) throw new Error(`Add On tidak tersedia untuk menu ${menu.name}.`);
+        return { ...addon, quantity: q };
+      });
+      return { menu, recipe, quantity, notes: it.notes || null, addons };
     });
 
     // Stock sufficiency check BEFORE any mutation (unless negative stock allowed)
@@ -62,7 +78,7 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
       }
     }
 
-    const subtotal = resolved.reduce((s, r) => s + r.menu.price * r.quantity, 0);
+    const subtotal = resolved.reduce((s, r) => s + r.menu.price * r.quantity + r.addons.reduce((a,x)=>a+x.price*x.quantity*r.quantity,0), 0);
     const grandTotal = subtotal - (discount || 0);
     const status = payment.status || (payment.method === 'CASH' ? 'PAID' : 'PENDING');
 
@@ -98,17 +114,17 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
     const trxId = info.lastInsertRowid;
 
     for (const r of resolved) {
-      insertItem.run({
+      const itemInfo = insertItem.run({
         transaction_id: trxId, menu_id: r.menu.id, recipe_id: r.recipe ? r.recipe.id : null,
         quantity: r.quantity, price: r.menu.price, notes: r.notes,
       });
+      const trxItemId = itemInfo.lastInsertRowid;
+      for (const a of r.addons) insertTrxAddon.run(trxItemId, a.id, a.name, a.quantity * r.quantity, a.price, a.inventory_item_id, a.quantity_per_addon, a.unit);
       // Deduct stock only when transaction becomes PAID (Section 12)
       if (status === 'PAID' && r.recipe) {
-        deductForSale({
-          recipeId: r.recipe.id, qtySold: r.quantity, referenceId: trxNo,
-          actorId: cashierId, allowNegative: allowNegativeStock,
-        });
+        deductForSale({ recipeId: r.recipe.id, qtySold: r.quantity, referenceId: trxNo, actorId: cashierId, allowNegative: allowNegativeStock });
       }
+      if (status === 'PAID') deductItemAddons(trxItemId, trxNo, cashierId, allowNegativeStock);
     }
 
     logAudit({ actorId: cashierId, action: 'CREATE', module: 'transactions', recordId: trxId, newValue: { trxNo, grandTotal, status } });
@@ -131,9 +147,8 @@ function updateQrisStatus({ transactionId, status, qrisReference, actorId }) {
     if (status === 'PAID') {
       const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
       for (const it of items) {
-        if (it.recipe_id) {
-          deductForSale({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
-        }
+        if (it.recipe_id) deductForSale({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+        deductItemAddons(it.id, trx.trx_no, actorId);
       }
     }
     logAudit({ actorId, action: 'UPDATE', module: 'transactions', recordId: transactionId, oldValue: { status: trx.payment_status }, newValue: { status } });
@@ -152,9 +167,8 @@ function voidTransaction({ transactionId, actorId, reason }) {
   const run = db.transaction(() => {
     const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
     for (const it of items) {
-      if (it.recipe_id) {
-        restoreForVoid({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
-      }
+      if (it.recipe_id) restoreForVoid({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+      restoreItemAddons(it.id, trx.trx_no, actorId);
     }
     db.prepare('UPDATE transactions SET payment_status = ? WHERE id = ?').run('VOID', transactionId);
     logAudit({ actorId, action: 'VOID', module: 'transactions', recordId: transactionId, oldValue: { status: 'PAID' }, newValue: { status: 'VOID', reason } });
