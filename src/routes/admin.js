@@ -232,7 +232,7 @@ router.get('/payroll/:id/payslip', requireAuth, (req, res) => {
   if (!isAdmin && !isOwnApproved) return res.status(403).json({ error: 'Tidak memiliki akses ke payslip ini.' });
 
   const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(payroll.employee_id);
-  const { workedDays, totalLateMinutes, totalWorkMinutes } = attendanceSummaryForPeriod(payroll.employee_id, payroll.period_start, payroll.period_end);
+  const { workedDays, totalLateMinutes, totalWorkMinutes, totalOvertimeMinutes, overtimePaidMinutes } = attendanceSummaryForPeriod(payroll.employee_id, payroll.period_start, payroll.period_end);
   const utilityDeductionItems = db.prepare(`SELECT date, description, amount FROM utilities
     WHERE employee_id = ? AND type = 'DEBIT' AND date BETWEEN ? AND ?
     ORDER BY date ASC, id ASC`).all(payroll.employee_id, payroll.period_start, payroll.period_end);
@@ -241,7 +241,7 @@ router.get('/payroll/:id/payslip', requireAuth, (req, res) => {
     streamPayslipPdf(res, {
       employeeName: employee.name,
       periodStart: payroll.period_start, periodEnd: payroll.period_end,
-      workedDays, totalLateMinutes, totalWorkMinutes,
+      workedDays, totalLateMinutes, totalWorkMinutes, totalOvertimeMinutes, overtimePaidMinutes,
       baseTotal: payroll.base_total, mealTotal: payroll.meal_total, transportTotal: payroll.transport_total,
       bonusTotal: payroll.bonus_total, overtimeTotal: payroll.overtime_total,
       lateDeductionTotal: payroll.late_deduction_total,
