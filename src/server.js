@@ -8,6 +8,7 @@ const { db } = require('./db');
 
 const authRoutes = require('./routes/auth');
 const menuRoutes = require('./routes/menu');
+const addonRoutes = require('./routes/addons');
 const inventoryRoutes = require('./routes/inventory');
 const posRoutes = require('./routes/pos');
 const attendanceRoutes = require('./routes/attendance');
@@ -57,6 +58,7 @@ app.use(session({
 
 app.use('/api/auth', authRoutes);
 app.use('/api/menu', requireAuth, menuRoutes);
+app.use('/api/addons', requireAuth, addonRoutes);
 app.use('/api/inventory', requireAuth, inventoryRoutes);
 app.use('/api/pos', requireAuth, posRoutes);
 app.use('/api/attendance', requireAuth, attendanceRoutes);
