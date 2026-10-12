@@ -825,9 +825,15 @@ async function saveSetting(key) {
 // ---------------- Audit Log ----------------
 async function renderAudit() {
   const logs = await api('GET','/admin/audit-log');
-  document.getElementById('view').innerHTML = `<h2>Audit Log</h2><div class="card"><table>
-    <tr><th>Tanggal &amp; Jam (WIB)</th><th>Actor</th><th>Action</th><th>Module</th><th>Record</th></tr>
-    ${logs.map(l=>`<tr><td>${formatJakartaDateTime(l.timestamp)}</td><td>${l.actor_id||'-'}</td><td>${l.action}</td><td>${l.module}</td><td>${l.record_id||'-'}</td></tr>`).join('')}
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const describe = value => {
+    if (!value) return '-';
+    try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return esc(JSON.stringify(parsed)); }
+    catch (_) { return esc(value); }
+  };
+  document.getElementById('view').innerHTML = `<h2>Audit Log</h2><div class="card"><p class="muted">Mencatat login/logout, aktivitas kasir, absensi, dan perubahan data. Aktivitas akun staff ditampilkan berdasarkan username dan nama karyawan.</p><table>
+    <tr><th>Tanggal &amp; Jam (WIB)</th><th>Akun / Actor</th><th>Action</th><th>Module</th><th>Record</th><th>Detail</th></tr>
+    ${logs.map(l=>`<tr><td>${esc(formatJakartaDateTime(l.timestamp))}</td><td>${esc(l.actor_username || (l.actor_id ? `ID ${l.actor_id}` : 'System'))}${l.actor_role ? ` <small>(${esc(l.actor_role)})</small>` : ''}${l.actor_employee_name ? `<br><small>${esc(l.actor_employee_name)}</small>` : ''}</td><td>${esc(l.action)}</td><td>${esc(l.module)}</td><td>${esc(l.record_id||'-')}</td><td style="max-width:360px;overflow-wrap:anywhere">${describe(l.new_value || l.old_value)}</td></tr>`).join('')}
     </table></div>`;
 }
 
