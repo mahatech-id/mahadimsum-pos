@@ -45,7 +45,7 @@ async function showTrxDetail(id) {
   document.getElementById('modalBody').innerHTML = `
     <h3>${trx.trx_no}</h3>
     <p class="muted">${trx.date} ${trx.time} — <span class="tag ${tagClass(trx.payment_status)}">${trx.payment_status}</span> — ${trx.payment_method}</p>
-    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity)}</td></tr>`).join('')}</table>
+    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${(i.addons||[]).map(a=>`<div class="muted" style="font-size:12px;">+ ${a.addon_name} x${a.quantity}</div>`).join('')}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity+(i.addons||[]).reduce((s,a)=>s+a.unit_price*a.quantity,0))}</td></tr>`).join('')}</table>
     <div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(trx.grand_total)}</span></div>
     ${trx.payment_method==='CASH'?`<div class="cart-row"><span>Dibayar</span><span>${rupiah(trx.paid_amount)}</span></div><div class="cart-row"><span>Kembalian</span><span>${rupiah(trx.change_amount)}</span></div>`:''}
   `;
@@ -80,7 +80,7 @@ async function renderHome() {
 
 async function renderKasir() {
   setPageTitle('Kasir');
-  if (!menuList.length) menuList = await api('GET', '/pos/menu-active');
+  menuList = await api('GET', '/pos/menu-active');
   const grouped = {};
   for (const m of menuList) { (grouped[m.category || 'Lainnya'] ??= []).push(m); }
 
@@ -88,13 +88,13 @@ async function renderKasir() {
   for (const [cat, items] of Object.entries(grouped)) {
     html += `<div class="muted" style="margin-top:8px;font-weight:600;">${cat}</div>`;
     for (const m of items) {
-      const inCart = cart.find(c => c.menu.id === m.id);
+      const inCartQty = cart.filter(c => String(c.menu.id) === String(m.id)).reduce((sum,c)=>sum+c.qty,0);
       html += `<div class="menu-item">
         <div>${m.name}<br><span class="muted">${rupiah(m.price)}</span></div>
         <div class="qty-ctrl">
           <button onclick="changeQty(${m.id},-1)">−</button>
-          <span>${inCart ? inCart.qty : 0}</span>
-          <button onclick="changeQty(${m.id},1)">+</button>
+          <span>${inCartQty}</span>
+          <button onclick="openStaffAddonPicker(${m.id})">+</button>
         </div>
       </div>`;
     }
@@ -102,9 +102,9 @@ async function renderKasir() {
   html += '</div>';
 
   if (cart.length) {
-    const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty, 0);
+    const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty + (c.addons||[]).reduce((a,x)=>a+x.price*x.quantity*c.qty,0), 0);
     html += `<div class="card"><h3>Review Cart</h3>`;
-    for (const c of cart) html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price * c.qty)}</span></div>`;
+    for (const c of cart) { html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price * c.qty)}</span></div>`; for(const a of (c.addons||[])) if(a.quantity) html += `<div class="cart-row muted" style="padding-left:14px;font-size:12px;"><span>+ ${a.name} x${a.quantity*c.qty}</span><span>${rupiah(a.price*a.quantity*c.qty)}</span></div>`; }
     html += `<div class="cart-row" style="font-weight:700;margin-top:6px;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(subtotal)}</span></div>
       <textarea id="notes" placeholder="Catatan (opsional): tidak pedas, saus dipisah, dll"></textarea>
       <div class="grid2">
@@ -117,6 +117,13 @@ async function renderKasir() {
   document.getElementById('view').innerHTML = html;
 }
 
+async function openStaffAddonPicker(menuId) {
+ const menu=menuList.find(m=>String(m.id)===String(menuId));if(!menu)return;
+ const existing=cart.find(c=>String(c.menu.id)===String(menuId));const selected=existing?(existing.addons||[]):[];
+ document.getElementById('modalBody').innerHTML=`<h3>Add On — ${menu.name}</h3><p class="muted">Opsional. Maksimal 4 qty per jenis untuk setiap porsi menu.</p>${(menu.addons||[]).map(a=>{const old=selected.find(x=>String(x.id)===String(a.id));return `<div class="cart-row"><span>${a.name}<br><small>${rupiah(a.price)}</small></span><select id="staffAddonQty_${a.id}" style="width:90px;">${[0,1,2,3,4].map(q=>`<option value="${q}" ${Number(old?.quantity||0)===q?'selected':''}>${q}</option>`).join('')}</select></div>`}).join('')||'<p class="muted">Belum ada Add On yang direlasikan ke menu ini.</p>'}<button onclick="saveStaffAddonPicker(${menu.id})">Simpan & Tambahkan Menu</button>`;
+ document.getElementById('modalCloseBtn').textContent='Batal';document.getElementById('modalOverlay').style.display='block';
+}
+function saveStaffAddonPicker(menuId){const menu=menuList.find(m=>String(m.id)===String(menuId));if(!menu)return;const addons=(menu.addons||[]).map(a=>({...a,quantity:Number(document.getElementById('staffAddonQty_'+a.id)?.value||0)})).filter(a=>a.quantity>0);cart.push({menu,qty:1,addons});document.getElementById('modalOverlay').style.display='none';document.getElementById('modalCloseBtn').textContent='Tutup';renderKasir();}
 function changeQty(menuId, delta) {
   // PostgreSQL BIGINT values are commonly returned as strings; inline onclick IDs are numbers.
   // Compare IDs as strings so the +/− controls work for both admin and staff datasets.
@@ -126,17 +133,17 @@ function changeQty(menuId, delta) {
     if (view) view.insertAdjacentHTML('afterbegin', '<p class="error">Menu tidak ditemukan. Muat ulang halaman Kasir.</p>');
     return;
   }
-  let entry = cart.find(c => String(c.menu.id) === String(menuId));
-  if (!entry) { if (delta > 0) cart.push({ menu, qty: 1 }); }
-  else { entry.qty += delta; if (entry.qty <= 0) cart = cart.filter(c => String(c.menu.id) !== String(menuId)); }
+  const matching = cart.filter(c => String(c.menu.id) === String(menuId));
+  if (delta > 0) { openStaffAddonPicker(menuId); return; }
+  if (matching.length) { const last=matching[matching.length-1]; cart=cart.filter(c=>c!==last); }
   renderKasir();
 }
 
 async function pay(method) {
   const notes = document.getElementById('notes')?.value || '';
-  const items = cart.map(c => ({ menu_id: c.menu.id, quantity: c.qty, notes: notes || undefined }));
+  const items = cart.map(c => ({ menu_id: c.menu.id, quantity: c.qty, addons:(c.addons||[]).filter(a=>a.quantity>0).map(a=>({addon_id:a.id,quantity:a.quantity})), notes: notes || undefined }));
   const idempotencyKey = 'trx-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-  const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty, 0);
+  const subtotal = cart.reduce((s, c) => s + c.menu.price * c.qty + (c.addons||[]).reduce((a,x)=>a+x.price*x.quantity*c.qty,0), 0);
   let payment = { method };
   if (method === 'CASH') {
     const paid = await promptCashPayment(subtotal);

@@ -21,6 +21,7 @@
       <div class="muted" style="margin:10px 0 4px;font-size:11px;">INVENTORY</div>
       <a href="#inventory" data-tab="inventory">Stock</a>
       <a href="#recipe" data-tab="recipe">Recipes</a>
+      <a href="#addons" data-tab="addons">Add On</a>
       <a href="#utilities" data-tab="utilities">Utilities</a>
       <div class="muted" style="margin:10px 0 4px;font-size:11px;">EMPLOYEE</div>
       <a href="#employees" data-tab="employees">Employees</a>
@@ -81,7 +82,7 @@ async function showTrxDetail(id) {
   document.getElementById('modalBody').innerHTML = `
     <h3>${trx.trx_no}</h3>
     <p class="muted">${trx.date} ${trx.time} — <span class="tag ${tagClass(trx.payment_status)}">${trx.payment_status}</span> — ${trx.payment_method} ${trx.type==='MANUAL'?'(Manual)':''}</p>
-    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity)}</td></tr>`).join('')}</table>
+    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${(i.addons||[]).map(a=>`<div class="muted" style="font-size:12px;">+ ${a.addon_name} x${a.quantity}</div>`).join('')}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity+(i.addons||[]).reduce((s,a)=>s+a.unit_price*a.quantity,0))}</td></tr>`).join('')}</table>
     <div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(trx.grand_total)}</span></div>
     ${trx.payment_method==='CASH'?`<div class="cart-row"><span>Dibayar</span><span>${rupiah(trx.paid_amount)}</span></div><div class="cart-row"><span>Kembalian</span><span>${rupiah(trx.change_amount)}</span></div>`:''}
   `;
@@ -163,16 +164,16 @@ function applyDashFilter() {
 // ---------------- POS (Admin can also transact / manual entry) ----------------
 let menuList = [], cart = [], adminPosNotes = '';
 async function renderPos() {
-  if (!menuList.length) menuList = await api('GET', '/pos/menu-active');
+  menuList = await api('GET', '/pos/menu-active');
   let html = '<h2>POS</h2><div class="grid2"><div class="card"><h3>Menu</h3>';
   for (const m of menuList) {
-    const inCart = cart.find(c => c.menu.id === m.id);
+    const inCartQty = cart.filter(c => String(c.menu.id) === String(m.id)).reduce((sum,c)=>sum+c.qty,0);
     html += `<div class="menu-item"><div>${m.name}<br><span class="muted">${rupiah(m.price)}</span></div>
-      <div class="qty-ctrl"><button onclick="posQty(${m.id},-1)">−</button><span>${inCart?inCart.qty:0}</span><button onclick="posQty(${m.id},1)">+</button></div></div>`;
+      <div class="qty-ctrl"><button onclick="posQty(${m.id},-1)">−</button><span>${inCartQty}</span><button onclick="openPosAddonPicker(${m.id})">+</button></div></div>`;
   }
   html += '</div><div class="card"><h3>Cart</h3>';
-  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
-  for (const c of cart) html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price*c.qty)}</span></div>`;
+  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty+(c.addons||[]).reduce((a,x)=>a+x.price*x.quantity*c.qty,0),0);
+  for (const c of cart) { html += `<div class="cart-row"><span>${c.menu.name} x${c.qty}</span><span>${rupiah(c.menu.price*c.qty)}</span></div>`; for(const a of (c.addons||[])) if(a.quantity) html += `<div class="cart-row muted" style="padding-left:14px;font-size:12px;"><span>+ ${a.name} x${a.quantity*c.qty}</span><span>${rupiah(a.price*a.quantity*c.qty)}</span></div>`; }
   html += `<div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(subtotal)}</span></div>
     <label for="adminPosNotes">Catatan (opsional)</label><textarea id="adminPosNotes" placeholder="Catatan (opsional): tidak pedas, saus dipisah, dll" oninput="adminPosNotes=this.value">${String(adminPosNotes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
     <div class="grid2"><button onclick="posPay('CASH')">Cash</button><button onclick="posPay('QRIS')">QRIS</button></div>
@@ -180,6 +181,18 @@ async function renderPos() {
     <button class="secondary" style="margin-top:8px;" onclick="openBulkManualTrx()">Upload Bulk Transaksi Manual (Excel)</button>
     <div id="posErr" class="error"></div></div></div>`;
   document.getElementById('view').innerHTML = html;
+}
+async function openPosAddonPicker(id) {
+  const menu = menuList.find(m => String(m.id) === String(id)); if (!menu) return;
+  const selected = [];
+  document.getElementById('modalBody').innerHTML = `<h3>Add On — ${menu.name}</h3><p class="muted">Opsional. Maksimal 4 qty per jenis untuk setiap porsi menu.</p>${(menu.addons||[]).map(a=>{const old=selected.find(x=>String(x.id)===String(a.id));return `<div class="cart-row"><span>${a.name}<br><small>${rupiah(a.price)}</small></span><select id="addonQty_${a.id}" style="width:90px;">${[0,1,2,3,4].map(q=>`<option value="${q}" ${Number(old?.quantity||0)===q?'selected':''}>${q}</option>`).join('')}</select></div>`}).join('') || '<p class="muted">Belum ada Add On yang direlasikan ke menu ini.</p>'}<button onclick="savePosAddonPicker(${menu.id})">Simpan & Tambahkan Menu</button>`;
+  document.getElementById('modalCloseBtn').textContent='Batal'; document.getElementById('modalOverlay').style.display='block';
+}
+function savePosAddonPicker(id) {
+  const menu=menuList.find(m=>String(m.id)===String(id)); if(!menu)return;
+  const addons=(menu.addons||[]).map(a=>({...a,quantity:Number(document.getElementById('addonQty_'+a.id)?.value||0)})).filter(a=>a.quantity>0);
+  cart.push({menu,qty:1,addons});
+  document.getElementById('modalOverlay').style.display='none'; document.getElementById('modalCloseBtn').textContent='Tutup'; renderPos();
 }
 function posQty(id, delta) {
   // PostgreSQL BIGINT values are commonly returned as strings; inline onclick IDs are numbers.
@@ -190,14 +203,14 @@ function posQty(id, delta) {
     if (err) err.textContent = 'Menu tidak ditemukan. Muat ulang halaman POS.';
     return;
   }
-  let e = cart.find(c => String(c.menu.id) === String(id));
-  if (!e) { if (delta > 0) cart.push({ menu, qty: 1 }); }
-  else { e.qty += delta; if (e.qty <= 0) cart = cart.filter(c => String(c.menu.id) !== String(id)); }
+  const matching = cart.filter(c => String(c.menu.id) === String(id));
+  if (delta > 0) { openPosAddonPicker(id); return; }
+  if (matching.length) { const last = matching[matching.length - 1]; cart = cart.filter(c => c !== last); }
   renderPos();
 }
 async function posPay(method) {
-  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, notes: adminPosNotes.trim() || undefined}));
-  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
+  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, addons:(c.addons||[]).filter(a=>a.quantity>0).map(a=>({addon_id:a.id,quantity:a.quantity})), notes: adminPosNotes.trim() || undefined}));
+  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty+(c.addons||[]).reduce((a,x)=>a+x.price*x.quantity*c.qty,0),0);
   let payment = { method };
   if (method === 'CASH') {
     const p = await promptCashPayment(subtotal);
@@ -219,9 +232,9 @@ async function posPay(method) {
   } catch(e) { document.getElementById('posErr').textContent = e.message; }
 }
 async function posManual() {
-  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, notes: adminPosNotes.trim() || undefined}));
+  const items = cart.map(c=>({menu_id:c.menu.id, quantity:c.qty, addons:(c.addons||[]).filter(a=>a.quantity>0).map(a=>({addon_id:a.id,quantity:a.quantity})), notes: adminPosNotes.trim() || undefined}));
   if (!items.length) return alertDialog('Tambahkan item dulu.');
-  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty,0);
+  const subtotal = cart.reduce((s,c)=>s+c.menu.price*c.qty+(c.addons||[]).reduce((a,x)=>a+x.price*x.quantity*c.qty,0),0);
   const today = jakartaISODate();
   const form = await promptDialog('Transaksi Manual', [
     { name: 'transactionDate', label: `Tanggal transaksi (total: ${rupiah(subtotal)})`, type: 'date', value: today },
@@ -385,6 +398,44 @@ async function deleteMenu(id) {
   const r = await api('DELETE', `/menu/${id}`);
   if (r.softDeleted) await alertDialog(r.message);
   renderMenu();
+}
+
+// ---------------- Add On Management ----------------
+async function renderAddons() {
+  const [addons, inventory, menus] = await Promise.all([api('GET','/addons'),api('GET','/inventory'),api('GET','/menu')]);
+  const esc = v => String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  document.getElementById('view').innerHTML = `<h2>Maintain Add On</h2><div class="card"><h3>Tambah Add On</h3>
+    <label>Nama Add On</label><input id="addonName" placeholder="Mozzarella / Nori / Saus Pedas / Chili Oil">
+    <label>Bahan stok (inventory)</label><select id="addonInventory" onchange="syncAddonUnit()">${inventory.filter(i=>Number(i.active)!==0).map(i=>`<option value="${i.id}">${esc(i.name)} (${esc(i.unit)})</option>`).join('')}</select>
+    <div class="grid3"><div><label>Harga jual (Rp)</label><input id="addonPrice" type="number" min="0" value="2000"></div><div><label>Takaran per Add On</label><input id="addonFormula" type="number" min="0.001" step="any" value="1"></div><div><label>Satuan formula (mengikuti inventory)</label><input id="addonUnit" placeholder="satuan inventory" value="${inventory.filter(i=>Number(i.active)!==0)[0]?.unit||'gr'}" readonly></div></div>
+    <label>Relasikan ke menu (bisa lebih dari satu)</label><div class="grid2">${menus.filter(m=>Number(m.active)!==0).map(m=>`<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" class="newAddonMenu" value="${m.id}"> ${esc(m.name)}</label>`).join('')}</div>
+    <button onclick="createAddon()">Simpan Add On</button><div id="addonErr" class="error"></div></div>
+    <div class="card"><h3>Daftar Add On</h3><table><tr><th>Nama</th><th>Bahan</th><th>Harga</th><th>Formula</th><th>Relasi Menu</th><th>Status</th><th>Aksi</th></tr>${addons.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.inventory_name)}</td><td>${rupiah(a.price)}</td><td>${a.quantity_per_addon} ${esc(a.unit)}</td><td>${(a.menu_ids||[]).map(id=>menus.find(m=>String(m.id)===String(id))?.name).filter(Boolean).map(esc).join(', ')||'-'}</td><td>${Number(a.active)?'Aktif':'Nonaktif'}</td><td><button class="secondary" onclick="editAddon(${a.id})">Edit</button></td></tr>`).join('')||'<tr><td colspan="7">Belum ada Add On.</td></tr>'}</table></div>`;
+  window._addonCache={addons,inventory,menus}; window._addonInventoryCache=inventory;
+}
+function syncAddonUnit(){const inv=window._addonInventoryCache?.find(i=>String(i.id)===String(document.getElementById('addonInventory')?.value));if(inv)document.getElementById('addonUnit').value=inv.unit;}
+async function createAddon(){
+  const menus=[...document.querySelectorAll('.newAddonMenu:checked')].map(x=>x.value);
+  const payload={name:document.getElementById('addonName').value,inventory_item_id:document.getElementById('addonInventory').value,price:Number(document.getElementById('addonPrice').value),quantity_per_addon:Number(document.getElementById('addonFormula').value),unit:document.getElementById('addonUnit').value,menu_ids:menus};
+  try{await api('POST','/addons',payload);menuList=[];await alertDialog('Add On berhasil disimpan.');renderAddons();}catch(e){document.getElementById('addonErr').textContent=e.message;}
+}
+async function editAddon(id){
+ const d=window._addonCache;const a=d.addons.find(x=>String(x.id)===String(id));if(!a)return;
+ document.getElementById('modalBody').innerHTML=`<h3>Edit Add On</h3>
+ <label>Nama Add On</label><input id="editAddonName" value="${String(a.name).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
+ <label>Bahan stok</label><select id="editAddonInventory" onchange="syncEditAddonUnit()">${d.inventory.map(i=>`<option value="${i.id}" ${String(i.id)===String(a.inventory_item_id)?'selected':''}>${i.name} (${i.unit})</option>`).join('')}</select>
+ <div class="grid2"><div><label>Harga jual (Rp)</label><input id="editAddonPrice" type="number" min="0" value="${a.price}"></div><div><label>Takaran per Add On</label><input id="editAddonFormula" type="number" min="0.001" step="any" value="${a.quantity_per_addon}"></div></div>
+ <label>Satuan formula</label><input id="editAddonUnit" value="${a.unit}">
+ <label>Status</label><select id="editAddonActive"><option value="1" ${Number(a.active)?'selected':''}>Aktif</option><option value="0" ${!Number(a.active)?'selected':''}>Nonaktif</option></select>
+ <label>Relasikan ke menu</label><div class="grid2" style="max-height:240px;overflow:auto;">${d.menus.filter(m=>Number(m.active)!==0).map(m=>`<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" class="editAddonMenu" value="${m.id}" ${(a.menu_ids||[]).some(x=>String(x)===String(m.id))?'checked':''}> ${m.name}</label>`).join('')}</div>
+ <button onclick="saveEditAddon(${a.id})">Simpan Perubahan</button>`;
+ document.getElementById('modalCloseBtn').textContent='Batal';document.getElementById('modalOverlay').style.display='block';
+}
+async function syncEditAddonUnit(){const inv=window._addonInventoryCache?.find(i=>String(i.id)===String(document.getElementById('editAddonInventory')?.value));if(inv)document.getElementById('editAddonUnit').value=inv.unit;}
+async function saveEditAddon(id){
+ const d=window._addonCache;const menu_ids=[...document.querySelectorAll('.editAddonMenu:checked')].map(x=>x.value);
+ const payload={name:document.getElementById('editAddonName').value,inventory_item_id:document.getElementById('editAddonInventory').value,price:Number(document.getElementById('editAddonPrice').value),quantity_per_addon:Number(document.getElementById('editAddonFormula').value),unit:document.getElementById('editAddonUnit').value,active:document.getElementById('editAddonActive').value==='1',menu_ids};
+ try{await api('PUT',`/addons/${id}`,payload);menuList=[];document.getElementById('modalOverlay').style.display='none';document.getElementById('modalCloseBtn').textContent='Tutup';await alertDialog('Add On diperbarui.');renderAddons();}catch(e){await alertDialog(e.message);}
 }
 
 // ---------------- Recipe ----------------
@@ -1030,7 +1081,7 @@ async function route() {
   setActiveTab(tab);
   const renderers = {
     dashboard: renderDashboard, pos: renderPos, transactions: renderTransactions,
-    menu: renderMenu, recipe: renderRecipe, inventory: renderInventory,
+    menu: renderMenu, recipe: renderRecipe, addons: renderAddons, inventory: renderInventory,
     utilities: renderUtilities,
     employees: renderEmployees, schedule: renderSchedule, attendance: renderAttendance, payroll: renderPayroll,
     users: renderUsers, roles: renderRoles, settings: renderSettings, audit: renderAudit, reports: renderReports,
