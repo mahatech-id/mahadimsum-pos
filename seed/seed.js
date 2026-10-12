@@ -195,6 +195,28 @@ const run = db.transaction(() => {
   ]);
 
   console.log('Base data seeded.');
+
+  // Seed the four standard Add Ons from inventory formulas; associate new defaults with all active menus.
+  const addonDefaults = [
+    { name: 'Mozzarella', inventoryName: 'Keju Mozzarella', quantity: 1, price: 2000 },
+    { name: 'Nori', inventoryName: 'Nori', quantity: 1, price: 2000 },
+    { name: 'Saus Pedas', inventoryName: 'Saus Pedas', quantity: 0.015, price: 2000 },
+    { name: 'Chili Oil', inventoryName: 'Chili Oil', quantity: 15, price: 2000 },
+  ];
+  for (const a of addonDefaults) {
+    const inventory = db.prepare('SELECT * FROM inventory_items WHERE LOWER(name)=LOWER(?) AND active=1').get(a.inventoryName);
+    if (!inventory) continue;
+    let addon = db.prepare('SELECT * FROM addons WHERE LOWER(name)=LOWER(?)').get(a.name);
+    if (!addon) {
+      const info = db.prepare('INSERT INTO addons (name, inventory_item_id, price, quantity_per_addon, unit, active) VALUES (?,?,?,?,?,1)')
+        .run(a.name, inventory.id, a.price, a.quantity, inventory.unit);
+      addon = db.prepare('SELECT * FROM addons WHERE id=?').get(info.lastInsertRowid);
+      for (const menu of db.prepare('SELECT id FROM menu WHERE active=1').all()) {
+        db.prepare('INSERT INTO menu_addons (menu_id, addon_id) VALUES (?,?) ON CONFLICT DO NOTHING').run(menu.id, addon.id);
+      }
+    }
+  }
+
 });
 
 run();
