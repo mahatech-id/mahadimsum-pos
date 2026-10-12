@@ -59,7 +59,8 @@ function streamPayslipPdf(res, data) {
   doc.fontSize(12).font('Helvetica-Bold').fillColor('#d9480f').text('Ringkasan Kehadiran', PAGE_LEFT, doc.y);
   doc.fontSize(10).font('Helvetica').fillColor('#000');
   doc.text(`Total Hari Kerja (Hadir): ${data.workedDays} hari`, PAGE_LEFT, doc.y, { width: PAGE_RIGHT - PAGE_LEFT });
-  doc.text(`Total Menit Kerja: ${data.totalWorkMinutes} menit`, PAGE_LEFT, doc.y, { width: PAGE_RIGHT - PAGE_LEFT });
+  const totalWorkMinutes = Math.max(0, Number(data.totalWorkMinutes || 0));
+  doc.text(`Total Jam Kerja: ${Math.floor(totalWorkMinutes / 60)} jam ${totalWorkMinutes % 60} menit`, PAGE_LEFT, doc.y, { width: PAGE_RIGHT - PAGE_LEFT });
   doc.text(`Total Menit Terlambat: ${data.totalLateMinutes} menit`, PAGE_LEFT, doc.y, { width: PAGE_RIGHT - PAGE_LEFT });
   doc.moveDown();
 
@@ -71,7 +72,7 @@ function streamPayslipPdf(res, data) {
     ['Uang Makan', data.mealTotal],
     ['Uang Transport', data.transportTotal],
     ['Bonus', data.bonusTotal],
-    ['Lembur (Overtime)', data.overtimeTotal],
+    [`Lembur (Overtime — ${Number(data.totalOvertimeMinutes || 0)} menit${Number(data.overtimePaidMinutes || 0) !== Number(data.totalOvertimeMinutes || 0) ? `; ${Number(data.overtimePaidMinutes || 0)} menit dibayar` : ''})`, data.overtimeTotal],
   ];
   let totalEarnings = 0;
   for (const [label, value] of earningsRows) {

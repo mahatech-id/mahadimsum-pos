@@ -21,7 +21,8 @@ function attendanceSummaryForPeriod(employeeId, periodStart, periodEnd) {
   const workedDays = attendanceRows.filter(a => a.check_in).length;
   const totalLateMinutes = attendanceRows.reduce((s, a) => s + (a.late_minutes || 0), 0);
   // Payroll counts only full 60-minute overtime blocks, including legacy/manual attendance records.
-  const totalOvertimeMinutes = attendanceRows.reduce((s, a) => s + Math.floor(Math.max(0, Number(a.overtime_minutes || 0)) / 60) * 60, 0);
+  const totalOvertimeMinutes = attendanceRows.reduce((s, a) => s + Math.max(0, Number(a.overtime_minutes || 0)), 0);
+  const overtimePaidMinutes = attendanceRows.reduce((s, a) => s + Math.floor(Math.max(0, Number(a.overtime_minutes || 0)) / 60) * 60, 0);
   // Total minutes actually worked = (check_out - check_in) summed across days with both timestamps present.
   const totalWorkMinutes = attendanceRows.reduce((sum, a) => {
     if (!a.check_in || !a.check_out) return sum;
@@ -39,7 +40,7 @@ function attendanceSummaryForPeriod(employeeId, periodStart, periodEnd) {
       : Number(getSetting('MINIMUM_WORK_HOURS_PER_DAY') || 8) * 60;
     return sum + Math.min(regularMinutesAfterOvertime, scheduledMinutes);
   }, 0);
-  return { attendanceRows, workedDays, totalLateMinutes, totalOvertimeMinutes, totalWorkMinutes };
+  return { attendanceRows, workedDays, totalLateMinutes, totalOvertimeMinutes, overtimePaidMinutes, totalWorkMinutes };
 }
 
 /** Net utilities effect tied directly to one employee (e.g. kasbon/advance deducted from gapok). */
@@ -57,7 +58,7 @@ function computePayrollForEmployee({ employeeId, userIdForSales, periodStart, pe
   const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!employee) throw new Error('Employee tidak ditemukan.');
 
-  const { attendanceRows, workedDays, totalLateMinutes, totalWorkMinutes } = attendanceSummaryForPeriod(employeeId, periodStart, periodEnd);
+  const { attendanceRows, workedDays, totalLateMinutes, totalOvertimeMinutes, overtimePaidMinutes, totalWorkMinutes } = attendanceSummaryForPeriod(employeeId, periodStart, periodEnd);
   const baseTotal = employee.base_salary * workedDays;
   const mealTotal = employee.meal_rate * workedDays;
   const transportTotal = employee.transport_rate * workedDays;
@@ -106,7 +107,7 @@ function computePayrollForEmployee({ employeeId, userIdForSales, periodStart, pe
   return {
     employeeId, periodStart, periodEnd, workedDays,
     baseTotal, mealTotal, transportTotal, bonusTotal, overtimeTotal, lateDeductionTotal,
-    utilitiesDeductionTotal, netPay, bonusDays, totalLateMinutes, totalWorkMinutes,
+    utilitiesDeductionTotal, netPay, bonusDays, totalLateMinutes, totalWorkMinutes, totalOvertimeMinutes, overtimePaidMinutes,
     lateDeductionRatePerMinute: perMinuteRateFromGapok,
   };
 }
