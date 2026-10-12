@@ -25,7 +25,7 @@ function assertWithinRadius(lat, lng) {
   }
 }
 
-function checkIn({ employeeId, lat, lng, photo, note }) {
+function checkIn({ employeeId, actorId, lat, lng, photo, note }) {
   if (lat == null || lng == null) {
     const err = new Error('Pastikan Location/GPS aktif lalu coba kembali.');
     err.code = 'GPS_UNAVAILABLE';
@@ -54,11 +54,11 @@ function checkIn({ employeeId, lat, lng, photo, note }) {
     db.prepare(`INSERT INTO attendance (employee_id, date, check_in, check_in_lat, check_in_lng, check_in_photo, check_in_note, late_minutes, status)
       VALUES (?,?,?,?,?,?,?,?,?)`).run(employeeId, date, now.format('HH:mm:ss'), lat, lng, photo || null, note || null, lateMinutes, status);
   }
-  logAudit({ actorId: employeeId, action: 'CHECK_IN', module: 'attendance', recordId: employeeId, newValue: { date, lateMinutes, note } });
+  logAudit({ actorId: actorId || null, action: 'CHECK_IN', module: 'attendance', recordId: employeeId, newValue: { employeeId, date, lateMinutes, note } });
   return db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND date = ?').get(employeeId, date);
 }
 
-function checkOut({ employeeId, lat, lng, photo, note }) {
+function checkOut({ employeeId, actorId, lat, lng, photo, note }) {
   const date = dayjs().format('YYYY-MM-DD');
   const existing = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND date = ?').get(employeeId, date);
   if (!existing || !existing.check_in) throw new Error('Belum check-in hari ini.');
@@ -77,7 +77,7 @@ function checkOut({ employeeId, lat, lng, photo, note }) {
 
   db.prepare(`UPDATE attendance SET check_out=?, check_out_lat=?, check_out_lng=?, check_out_photo=?, check_out_note=?, overtime_minutes=? WHERE id=?`)
     .run(now.format('HH:mm:ss'), lat, lng, photo || null, note || null, overtimeMinutes, existing.id);
-  logAudit({ actorId: employeeId, action: 'CHECK_OUT', module: 'attendance', recordId: employeeId, newValue: { date, overtimeMinutes, note } });
+  logAudit({ actorId: actorId || null, action: 'CHECK_OUT', module: 'attendance', recordId: employeeId, newValue: { employeeId, date, overtimeMinutes, note } });
   return db.prepare('SELECT * FROM attendance WHERE id = ?').get(existing.id);
 }
 
