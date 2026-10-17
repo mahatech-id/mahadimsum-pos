@@ -76,13 +76,41 @@ function formatJakartaDateTime(value) {
   }).format(parsed);
 }
 function closeModal() { if (window.qrisPaymentModalActive) return; document.getElementById('modalOverlay').style.display = 'none'; const dialog=document.querySelector('#modalOverlay .modal-dialog'); if(dialog)dialog.classList.remove('addon-edit-dialog'); }
+function formatTransactionNotes(notes) {
+  if (!notes) return '';
+  let raw = String(notes);
+  const parts = [];
+  const variantMatch = raw.match(/\[\[VARIANTS:([^\]]+)\]\]/);
+  if (variantMatch) {
+    try {
+      const encoded = variantMatch[1];
+      const variants = JSON.parse(decodeURIComponent(encoded));
+      if (Array.isArray(variants) && variants.length) {
+        const summary = variants.map(v => `${String(v.name || 'Varian')} × ${Number(v.quantity) || 0}`).join(', ');
+        parts.push(`Varian: ${summary}`);
+      }
+      raw = raw.replace(variantMatch[0], '');
+    } catch (_) {
+      // Keep unknown legacy note content visible rather than hiding it.
+    }
+  }
+  if (/\[\[SINGLE_UNIT\]\]/.test(raw)) {
+    parts.push('Mode: Dimsum Satuan');
+    raw = raw.replace(/\[\[SINGLE_UNIT\]\]/g, '');
+  }
+  const cleanText = raw.trim();
+  if (cleanText) parts.push(cleanText);
+  if (!parts.length) return '';
+  const escapeText = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return `<div class="muted transaction-notes" style="font-size:12px;margin-top:3px;">${parts.map(escapeText).join(' · ')}</div>`;
+}
 async function showTrxDetail(id) {
   const trx = await api('GET', `/pos/transactions/${id}`);
   const tagClass = s => s==='PAID'?'paid':s==='VOID'?'void':'pending';
   document.getElementById('modalBody').innerHTML = `
     <h3>${trx.trx_no}</h3>
     <p class="muted">${trx.date} ${trx.time} — <span class="tag ${tagClass(trx.payment_status)}">${trx.payment_status}</span> — ${trx.payment_method} ${trx.type==='MANUAL'?'(Manual)':''}</p>
-    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${(i.addons||[]).map(a=>`<div class="muted" style="font-size:12px;">+ ${a.addon_name} x${a.quantity}</div>`).join('')}${i.notes ? `<div class="muted" style="font-size:12px;margin-top:3px;">Notes/Description: ${String(i.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>` : ''}</td><td>${rupiah(i.price*i.quantity+(i.addons||[]).reduce((s,a)=>s+a.unit_price*a.quantity,0))}</td></tr>`).join('')}</table>
+    <table>${trx.items.map(i=>`<tr><td>${i.menu_name} x${i.quantity}${(i.addons||[]).map(a=>`<div class="muted" style="font-size:12px;">+ ${a.addon_name} x${a.quantity}</div>`).join('')}${formatTransactionNotes(i.notes)}</td><td>${rupiah(i.price*i.quantity+(i.addons||[]).reduce((s,a)=>s+a.unit_price*a.quantity,0))}</td></tr>`).join('')}</table>
     <div class="cart-row" style="font-weight:700;border-top:1px solid #eee;padding-top:6px;"><span>Total</span><span>${rupiah(trx.grand_total)}</span></div>
     ${trx.payment_method==='CASH'?`<div class="cart-row"><span>Dibayar</span><span>${rupiah(trx.paid_amount)}</span></div><div class="cart-row"><span>Kembalian</span><span>${rupiah(trx.change_amount)}</span></div>`:''}
   `;
@@ -496,7 +524,7 @@ async function loadRecipeFor(menuId) {
     html += `<div style="margin-bottom:10px;padding:8px;border:1px solid #eee;border-radius:8px;">
       <b>Version ${r.version}</b> ${r.active?'<span class="tag paid">Active</span>':'<span class="tag void">Inactive</span>'}
       ${r.active?`<button class="secondary" onclick="editActiveRecipe(${menuId},${r.id})">Edit versi aktif</button>`:`<button class="secondary" onclick="deleteInactiveRecipe(${menuId},${r.id})">Hapus versi nonaktif</button>`}
-      <table>${r.items.filter(i=>!isVariantStockName(i.item_name)).map(i=>`<tr><td>${esc(i.item_name)}</td><td>${i.quantity} ${esc(i.unit)}</td></tr>`).join('')}</table>
+      <table>${r.items.filter(i=>!isVariantStockName(i.item_name)).map(i=>`<tr><td>${escapeHtml(i.item_name)}</td><td>${i.quantity} ${escapeHtml(i.unit)}</td></tr>`).join('')}</table>
     </div>`;
   }
   html += `</div><div class="card"><h3 id="recipeEditorTitle">Buat Versi Baru</h3><p class="muted">Bahan yang belum disimpan bisa dihapus dengan tombol Hapus pada barisnya. Mengedit versi aktif akan membuat versi baru agar riwayat recipe lama tetap tersimpan.</p><div id="newRecipeItems"></div>
