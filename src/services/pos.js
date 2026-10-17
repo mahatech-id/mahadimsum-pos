@@ -43,6 +43,26 @@ function deductVariants(variants, referenceId, actorId, allowNegative = false) {
     applyStockChange({ inventoryItemId: inv.id, type:'SALE', quantity:-qty, referenceId, note:`Varian terjual: ${v.name} x${qty}`, actorId, allowNegative });
   }
 }
+
+function sauceStockQuantity(inventory) {
+  const unit = String(inventory.unit || '').trim().toLowerCase();
+  if (unit === 'kg' || unit === 'kilogram') return 0.015;
+  if (unit === 'mg') return 15000;
+  // Default to grams for sauce inventory; one free pack is exactly 15 g.
+  return 15;
+}
+function getIncludedSauceAddons() {
+  const result = [];
+  for (const name of ['Saus Pedas', 'Chili Oil']) {
+    const addon = db.prepare(`SELECT a.*, ii.unit AS inventory_unit, ii.name AS inventory_name
+      FROM addons a JOIN inventory_items ii ON ii.id=a.inventory_item_id
+      WHERE lower(trim(a.name))=lower(?) AND a.active=1 AND ii.active=1 ORDER BY a.id LIMIT 1`).get(name);
+    if (!addon) throw new Error(`Item Add On/stok "${name}" harus tersedia agar setiap pesanan mendapat saus gratis 15 g.`);
+    result.push({ ...addon, name: `${name} (Gratis 15 g, Ziplock)`, price: 0, quantity: 1,
+      quantity_per_addon: sauceStockQuantity({ unit: addon.inventory_unit }), unit: addon.inventory_unit });
+  }
+  return result;
+}
 function restoreVariants(variants, referenceId, actorId) {
   for (const v of variants || []) {
     const qty = Number(v.quantity || 0); if (!Number.isInteger(qty) || qty < 1) continue;
@@ -84,11 +104,17 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
         if (!addon) throw new Error(`Add On tidak tersedia untuk menu ${menu.name}.`);
         return { ...addon, quantity: q };
       });
+      // Every purchased menu line includes two complimentary 15 g sauce packs in ziplock.
+      // They are stored as zero-price transaction add-ons so stock, receipts, and voids stay auditable.
+      const includedSauces = getIncludedSauceAddons();
+      const allAddons = [...addons, ...includedSauces];
       const variants = Array.isArray(it.variants) ? it.variants.filter(v => Number(v.quantity) > 0).map(v => ({ name: String(v.name || ''), quantity: Number(v.quantity) })) : [];
-      if (variants.some(v => !['Dimsum','Ekado','Lumpia'].includes(v.name) || !Number.isInteger(v.quantity) || v.quantity < 1 || v.quantity > 6)) throw new Error('Pilihan varian Dimsum/Ekado/Lumpia tidak valid.');
+      if (variants.some(v => !['Dimsum','Ekado','Lumpia'].includes(v.name) || !Number.isInteger(v.quantity) || v.quantity < 1)) throw new Error('Pilihan varian Dimsum/Ekado/Lumpia tidak valid.');
+      const isSingleMenu = /dimsum satuan/i.test(menu.name);
+      if (isSingleMenu && variants.reduce((sum, v) => sum + v.quantity, 0) !== quantity) throw new Error('Total varian Dimsum/Ekado/Lumpia harus sama dengan quantity Dimsum Satuan.');
       const cleanNotes = it.notes || null;
-      const savedNotes = variants.length ? `${cleanNotes || ''} [[VARIANTS:${encodeURIComponent(JSON.stringify(variants))}]]`.trim() : cleanNotes;
-      return { menu, recipe, quantity, notes: savedNotes, addons, variants };
+      const savedNotes = `${variants.length ? `[[VARIANTS:${encodeURIComponent(JSON.stringify(variants))}]]` : ''}${isSingleMenu ? ' [[SINGLE_UNIT]]' : ''}${cleanNotes ? ` ${cleanNotes}` : ''}`.trim() || null;
+      return { menu, recipe, quantity, notes: savedNotes, addons: allAddons, variants };
     });
 
     // Stock sufficiency check BEFORE any mutation (unless negative stock allowed)
@@ -108,7 +134,7 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
 
     if (!allowNegativeStock) {
       const needs = {};
-      for (const r of resolved) for (const v of r.variants) needs[v.name] = (needs[v.name] || 0) + v.quantity * r.quantity;
+      for (const r of resolved) for (const v of r.variants) needs[v.name] = (needs[v.name] || 0) + v.quantity * (/dimsum satuan/i.test(r.menu.name) ? 1 : r.quantity);
       for (const [name, need] of Object.entries(needs)) {
         const inv = getVariantInventory(name);
         if (!inv) throw new Error(`Item stok varian \"${name}\" belum tersedia di menu Stock.`);
@@ -162,7 +188,9 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
       if (status === 'PAID' && r.recipe) {
         deductForSale({ recipeId: r.recipe.id, qtySold: r.quantity, referenceId: trxNo, actorId: cashierId, allowNegative: allowNegativeStock });
       }
-      if (status === 'PAID') deductVariants(r.variants, trxNo, cashierId, allowNegativeStock);
+      if (status === 'PAID') {
+        deductVariants(r.variants.map(v => ({...v, quantity: v.quantity * (/dimsum satuan/i.test(r.menu.name) ? 1 : r.quantity)})), trxNo, cashierId, allowNegativeStock);
+      }
       if (status === 'PAID') deductItemAddons(trxItemId, trxNo, cashierId, allowNegativeStock);
     }
 
@@ -187,7 +215,7 @@ function updateQrisStatus({ transactionId, status, qrisReference, actorId }) {
       const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
       for (const it of items) {
         if (it.recipe_id) deductForSale({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
-        deductVariants(parseVariants(it.notes).variants, trx.trx_no, actorId, true);
+        deductVariants(parseVariants(it.notes).variants.map(v => ({...v, quantity: v.quantity * (String(it.notes||'').includes('[[SINGLE_UNIT]]') ? 1 : it.quantity)})), trx.trx_no, actorId, true);
         deductItemAddons(it.id, trx.trx_no, actorId);
       }
     }
@@ -208,7 +236,7 @@ function voidTransaction({ transactionId, actorId, reason }) {
     const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
     for (const it of items) {
       if (it.recipe_id) restoreForVoid({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
-      restoreVariants(parseVariants(it.notes).variants, trx.trx_no, actorId);
+      restoreVariants(parseVariants(it.notes).variants.map(v => ({...v, quantity: v.quantity * (String(it.notes||'').includes('[[SINGLE_UNIT]]') ? 1 : it.quantity)})), trx.trx_no, actorId);
       restoreItemAddons(it.id, trx.trx_no, actorId);
     }
     db.prepare('UPDATE transactions SET payment_status = ? WHERE id = ?').run('VOID', transactionId);
