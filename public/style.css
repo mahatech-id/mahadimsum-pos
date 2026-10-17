@@ -50,22 +50,15 @@ th, td { text-align:left; padding: 8px 6px; border-bottom: 1px solid var(--borde
 .brand { display:flex; align-items:center; gap:10px; }
 .brand-logo { width:38px; height:38px; object-fit:contain; border-radius:8px; background:#fff; }
 
-/* Add On management: responsive form, menu relation checkboxes and readable item cards */
-.addon-form-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:start; }
-.addon-form-grid > div { min-width:0; }
-.addon-menu-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; margin:8px 0 14px; }
-.addon-check { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:#fff; }
-.addon-check input { width:16px; height:16px; flex:0 0 16px; margin:0; }
-.addon-check span { overflow-wrap:anywhere; }
-.addon-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; }
-.addon-item { min-width:0; border:1px solid var(--border); border-radius:12px; padding:14px; background:#fff; }
-.addon-item-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px; }
-.addon-item-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
-.addon-item-grid > div { min-width:0; }
-.addon-item-grid small { display:block; color:var(--muted); margin-bottom:4px; }
-.addon-item-grid b { display:block; overflow-wrap:anywhere; font-size:14px; font-weight:600; }
-.addon-item button { width:100%; }
-.recipeRow { align-items:start; margin-bottom:8px; }
-.recipeRow select, .recipeRow input { min-width:0; }
-@media (max-width:700px) { .addon-form-grid { grid-template-columns:1fr; gap:0; } .addon-item-grid { grid-template-columns:1fr 1fr; } }
-@media (max-width:420px) { .addon-item-grid { grid-template-columns:1fr; } .recipeRow { grid-template-columns:1fr; } }
+/* Admin Add On form: responsive layout that avoids squeezed controls and wide tables. */
+.addon-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:12px 0; }
+.addon-field { min-width:0; margin:8px 0; }
+.addon-field label { display:block; margin-bottom:6px; font-weight:600; }
+.addon-field input, .addon-field select { width:100%; min-width:0; box-sizing:border-box; }
+.addon-menu-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px 14px; max-height:260px; overflow:auto; padding:10px; border:1px solid var(--border,#e5e7eb); border-radius:8px; }
+.addon-menu-check { display:flex!important; align-items:flex-start; gap:8px; font-weight:400!important; min-width:0; }
+.addon-menu-check input { width:auto; margin-top:3px; flex:0 0 auto; }
+.addon-menu-check span { overflow-wrap:anywhere; }
+.addon-table-wrap { width:100%; overflow-x:auto; }
+.addon-table { min-width:760px; }
+@media (max-width:650px) { .addon-form-grid { grid-template-columns:minmax(0,1fr); } }

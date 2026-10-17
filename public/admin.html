@@ -413,18 +413,36 @@ async function deleteMenu(id) {
 
 // ---------------- Add On Management ----------------
 async function renderAddons() {
-  const [addons, inventory, menus] = await Promise.all([api('GET','/addons'),api('GET','/inventory'),api('GET','/menu')]);
-  const activeInventory=inventory.filter(i=>Number(i.active)!==0);
-  document.getElementById('view').innerHTML = `<h2>Maintain Add On</h2>
-    <div class="card addon-form"><h3>Tambah Add On</h3>
-      <label for="addonName">Nama Add On</label><input id="addonName" placeholder="Mozzarella / Nori / Saus Pedas / Chili Oil">
-      <label for="addonInventory">Bahan stok (inventory)</label><select id="addonInventory" onchange="syncAddonUnit()"><option value="">-- Pilih bahan --</option>${activeInventory.map(i=>`<option value="${i.id}">${esc(i.name)} (${esc(i.unit)})</option>`).join('')}</select>
-      <div class="addon-form-grid"><div><label for="addonPrice">Harga jual (Rp)</label><input id="addonPrice" type="number" min="0" value="2000"></div><div><label for="addonFormula">Takaran per Add On</label><input id="addonFormula" type="number" min="0.001" step="any" value="1"></div><div><label for="addonUnit">Satuan formula</label><input id="addonUnit" placeholder="Satuan inventory" value="${esc(activeInventory[0]?.unit||'')}" readonly></div></div>
-      <label>Relasikan ke menu (bisa lebih dari satu)</label><div class="addon-menu-grid">${menus.filter(m=>Number(m.active)!==0).map(m=>`<label class="addon-check"><input type="checkbox" class="newAddonMenu" value="${m.id}"> <span>${esc(m.name)}</span></label>`).join('')||'<p class="muted">Belum ada menu aktif.</p>'}</div>
-      <button onclick="createAddon()">Simpan Add On</button><div id="addonErr" class="error"></div></div>
-    <div class="card"><h3>Daftar Add On</h3><div class="addon-list">${addons.map(a=>`<article class="addon-item"><div class="addon-item-head"><strong>${esc(a.name)}</strong><span class="tag ${Number(a.active)?'paid':'void'}">${Number(a.active)?'Aktif':'Nonaktif'}</span></div><div class="addon-item-grid"><div><small>Bahan stok</small><b>${esc(a.inventory_name||'-')}</b></div><div><small>Harga jual</small><b>${rupiah(a.price)}</b></div><div><small>Formula</small><b>${a.quantity_per_addon} ${esc(a.unit)}</b></div><div><small>Relasi menu</small><b>${(a.menu_ids||[]).map(id=>menus.find(m=>String(m.id)===String(id))?.name).filter(Boolean).map(esc).join(', ')||'-'}</b></div></div><button class="secondary" onclick="editAddon(${a.id})">Edit Add On</button></article>`).join('')||'<p class="muted">Belum ada Add On.</p>'}</div></div>`;
-  window._addonCache={addons,inventory,menus}; window._addonInventoryCache=inventory;
+  const view = document.getElementById('view');
+  view.innerHTML = '<h2>Maintain Add On</h2><div class="card">Memuat data Add On...</div>';
+  try {
+    const [addons, inventory, menus] = await Promise.all([
+      api('GET','/addons'), api('GET','/inventory'), api('GET','/menu')
+    ]);
+    const activeInventory = inventory.filter(i => Number(i.active) === 1 || i.active === true || i.active === '1');
+    const activeMenus = menus.filter(m => Number(m.active) === 1 || m.active === true || m.active === '1');
+    const invOptions = activeInventory.map(i => `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('');
+    const menuChecks = activeMenus.map(m => `<label class="addon-menu-check"><input type="checkbox" class="newAddonMenu" value="${m.id}"> <span>${escapeHtml(m.name)}</span></label>`).join('');
+    view.innerHTML = `<h2>Maintain Add On</h2>
+      <div class="card addon-form-card"><h3>Tambah Add On</h3>
+        <div class="addon-form-grid">
+          <div class="addon-field"><label for="addonName">Nama Add On</label><input id="addonName" placeholder="Mozzarella / Nori / Saus Pedas / Chili Oil"></div>
+          <div class="addon-field"><label for="addonInventory">Bahan stok (inventory)</label><select id="addonInventory" onchange="syncAddonUnit()">${invOptions || '<option value="">Belum ada bahan inventory aktif</option>'}</select></div>
+          <div class="addon-field"><label for="addonPrice">Harga jual (Rp)</label><input id="addonPrice" type="number" min="0" value="2000"></div>
+          <div class="addon-field"><label for="addonFormula">Takaran per Add On</label><input id="addonFormula" type="number" min="0.001" step="any" value="1"></div>
+          <div class="addon-field"><label for="addonUnit">Satuan formula</label><input id="addonUnit" placeholder="satuan inventory" value="${escapeHtml(activeInventory[0]?.unit || '')}" readonly></div>
+        </div>
+        <div class="addon-field"><label>Relasikan ke menu (bisa lebih dari satu)</label><div class="addon-menu-grid">${menuChecks || '<span class="muted">Belum ada menu aktif.</span>'}</div></div>
+        <button onclick="createAddon()" ${activeInventory.length ? '' : 'disabled'}>Simpan Add On</button><div id="addonErr" class="error" role="alert"></div>
+      </div>
+      <div class="card"><h3>Daftar Add On</h3><div class="addon-table-wrap"><table class="addon-table"><thead><tr><th>Nama</th><th>Bahan</th><th>Harga</th><th>Formula</th><th>Relasi Menu</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${addons.map(a=>`<tr><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.inventory_name || '')}</td><td>${rupiah(a.price)}</td><td>${a.quantity_per_addon} ${escapeHtml(a.unit)}</td><td>${(a.menu_ids||[]).map(id=>menus.find(m=>String(m.id)===String(id))?.name).filter(Boolean).map(escapeHtml).join(', ')||'-'}</td><td>${Number(a.active)?'Aktif':'Nonaktif'}</td><td><button class="secondary" onclick="editAddon(${a.id})">Edit</button></td></tr>`).join('')||'<tr><td colspan="7">Belum ada Add On.</td></tr>'}</tbody></table></div></div>`;
+    window._addonCache={addons,inventory,menus}; window._addonInventoryCache=inventory;
+  } catch (e) {
+    view.innerHTML = `<h2>Maintain Add On</h2><div class="card"><p class="error">Gagal membuka menu Add On: ${escapeHtml(e.message || 'Kesalahan tidak diketahui')}</p><button class="secondary" onclick="renderAddons()">Coba lagi</button></div>`;
+  }
 }
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
 function syncAddonUnit(){const inv=window._addonInventoryCache?.find(i=>String(i.id)===String(document.getElementById('addonInventory')?.value));if(inv)document.getElementById('addonUnit').value=inv.unit;}
 async function createAddon(){
   const menus=[...document.querySelectorAll('.newAddonMenu:checked')].map(x=>x.value);
@@ -453,24 +471,23 @@ async function saveEditAddon(id){
 // ---------------- Recipe ----------------
 let recipeMenus = [], invItemsCache = [];
 async function renderRecipe() {
+  const view = document.getElementById('view');
+  view.innerHTML = '<h2>Recipe / Formula</h2><div class="card">Memuat menu dan bahan inventory...</div>';
   try {
   recipeMenus = await api('GET','/menu');
-  invItemsCache = (await api('GET','/inventory')).filter(i=>Number(i.active)!==0);
+  invItemsCache = await api('GET','/inventory');
   document.getElementById('view').innerHTML = `<h2>Recipe / Formula</h2>
     <div class="card"><label>Pilih Menu</label>
     <select id="recipeMenuSelect" onchange="loadRecipeFor(this.value)">
       <option value="">-- pilih --</option>
       ${recipeMenus.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
     </select></div><div id="recipeDetail"></div>`;
-  if (!recipeMenus.length) document.getElementById('recipeDetail').innerHTML='<div class="card error">Belum ada menu. Buat menu terlebih dahulu.</div>';
-  } catch(e) { document.getElementById('view').innerHTML='<h2>Recipe / Formula</h2><div class="card error">Gagal memuat data Recipe: '+esc(e.message)+'</div><button onclick="renderRecipe()">Coba lagi</button>'; }
+  } catch (e) { view.innerHTML = `<h2>Recipe / Formula</h2><div class="card"><p class="error">Gagal memuat Recipe: ${escapeHtml(e.message || 'Kesalahan tidak diketahui')}</p><button class="secondary" onclick="renderRecipe()">Coba lagi</button></div>`; }
 }
 function selectRecipeMenu(id) { const sel = document.getElementById('recipeMenuSelect'); if (sel) { sel.value = id; loadRecipeFor(id); } }
 async function loadRecipeFor(menuId) {
   if (!menuId) { document.getElementById('recipeDetail').innerHTML=''; return; }
-  const detail=document.getElementById('recipeDetail'); if(!detail)return;
-  detail.innerHTML='<div class="card muted">Memuat recipe...</div>';
-  try { const recipes = await api('GET', `/menu/${menuId}/recipes`);
+  const recipes = await api('GET', `/menu/${menuId}/recipes`);
   let html = '<div class="card"><h3>Versi Recipe</h3>';
   for (const r of recipes) {
     html += `<div style="margin-bottom:10px;padding:8px;border:1px solid #eee;border-radius:8px;">
@@ -483,14 +500,13 @@ async function loadRecipeFor(menuId) {
     <button class="secondary" onclick="addRecipeItemRow()">+ Bahan</button>
     <button id="saveRecipeBtn" onclick="saveNewRecipe(${menuId})" style="margin-top:8px;">Simpan Versi Baru</button></div>`;
   document.getElementById('recipeDetail').innerHTML = html;
-  if (!invItemsCache.length) document.getElementById('newRecipeItems').innerHTML='<p class="error">Tidak ada bahan inventory aktif. Aktifkan atau tambahkan bahan di menu Inventory terlebih dahulu.</p>';
-  else addRecipeItemRow();
-  } catch(e) { detail.innerHTML='<div class="card error">Gagal memuat recipe: '+esc(e.message)+'</div><button onclick="loadRecipeFor('+Number(menuId)+')">Coba lagi</button>'; }
+  addRecipeItemRow();
 }
 function recipeRowHtml(selectedId='', quantity='') {
-  const options=invItemsCache.filter(i=>!/^(dimsum|ekado|lumpia)$/i.test(String(i.name||'').trim())).map(i=>`<option value="${i.id}" data-unit="${esc(i.unit)}" ${String(i.id)===String(selectedId)?'selected':''}>${esc(i.name)} (${esc(i.unit)})</option>`).join('');
+  const usableItems = invItemsCache.filter(i => Number(i.active) === 1 || i.active === true || i.active === '1');
+  const options=usableItems.map(i=>`<option value="${i.id}" data-unit="${escapeHtml(i.unit)}" ${String(i.id)===String(selectedId)?'selected':''}>${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('');
   const div=document.createElement('div'); div.className='grid2 recipeRow';
-  div.innerHTML=`<select class="riItem">${options}</select><div style="display:flex;gap:6px;align-items:center;"><input class="riQty" type="number" min="0.001" step="0.01" placeholder="Quantity" value="${quantity}" style="flex:1;min-width:0;"><button type="button" class="secondary" onclick="this.closest('.recipeRow').remove()">Hapus</button></div>`;
+  div.innerHTML=`<select class="riItem" ${options ? '' : 'disabled'}>${options || '<option value="">Tidak ada bahan inventory aktif</option>'}</select><div style="display:flex;gap:6px;align-items:center;"><input class="riQty" type="number" min="0.001" step="0.01" placeholder="Quantity" value="${quantity}" style="flex:1;min-width:0;"><button type="button" class="secondary" onclick="this.closest('.recipeRow').remove()">Hapus</button></div>`;
   return div;
 }
 function addRecipeItemRow(selectedId='', quantity='') { const target=document.getElementById('newRecipeItems'); if(target) target.appendChild(recipeRowHtml(selectedId,quantity)); }
@@ -511,14 +527,13 @@ async function deleteInactiveRecipe(menuId, recipeId) {
 }
 async function saveNewRecipe(menuId) {
   const rows = document.querySelectorAll('#newRecipeItems .recipeRow');
-  if (!rows.length) return alertDialog('Tambahkan minimal satu baris bahan inventory aktif.');
   const items = Array.from(rows).map(r => {
     const sel = r.querySelector('.riItem');
     return { inventory_item_id: Number(sel.value), quantity: Number(r.querySelector('.riQty').value), unit: sel.selectedOptions[0]?.dataset.unit };
-  });
-  if(items.some(i=>!Number.isInteger(i.inventory_item_id)||i.inventory_item_id<=0))return alertDialog('Pilih bahan untuk setiap baris, atau hapus baris yang tidak digunakan.');
-  if(items.some(i=>!Number.isFinite(i.quantity)||i.quantity<=0))return alertDialog('Pastikan takaran semua bahan valid dan lebih besar dari 0.');
+  }).filter(i => i.quantity > 0);
   if (!items.length) return alertDialog('Isi minimal 1 bahan.');
+  if (items.some(i => !Number.isInteger(i.inventory_item_id) || i.inventory_item_id <= 0)) return alertDialog('Pilih bahan inventory pada setiap baris recipe.');
+  if(items.some(i=>!Number.isFinite(i.quantity)||i.quantity<=0))return alertDialog('Pastikan takaran semua bahan valid.');
   try { await api('POST', `/menu/${menuId}/recipes`, { items }); await loadRecipeFor(menuId); await alertDialog('Recipe disimpan dan menjadi versi aktif.'); }
   catch(e){await alertDialog(e.message||'Gagal menyimpan recipe.');}
 }
