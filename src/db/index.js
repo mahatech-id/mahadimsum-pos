@@ -174,7 +174,7 @@ db.exec(`
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_utilities_payroll_recovery ON utilities(payroll_id) WHERE payroll_id IS NOT NULL');
 
 const DEFAULT_SETTINGS = {
-  OPENING_TIME: '14:00', CLOSING_TIME: '22:00', BONUS_THRESHOLD_PCS: '150', BONUS_AMOUNT: '25000',
+  CLOCK_IN_TIME: '13:30', OPENING_TIME: '13:00', CLOSING_TIME: '21:00', BONUS_THRESHOLD_PCS: '150', BONUS_AMOUNT: '25000',
   OVERTIME_RATE_PER_HOUR: '5000', MINIMUM_OVERTIME_MINUTES: '60', LATE_DEDUCTION_METHOD: 'PER_MINUTE',
   LATE_DEDUCTION_RATE: '500', MINIMUM_WORK_HOURS_PER_DAY: '8', ATTENDANCE_RADIUS_METERS: '150',
   ATTENDANCE_LAT: '-6.200000', ATTENDANCE_LNG: '106.816666',
@@ -193,6 +193,17 @@ const DEFAULT_SETTINGS = {
 };
 for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING').run(key, value);
+}
+// Migrate known built-in schedule defaults while preserving other admin-configured values.
+for (const [key, oldValues, newValue] of [
+  ['CLOCK_IN_TIME', ['13:00'], '13:30'],
+  ['OPENING_TIME', ['13:30', '14:00'], '13:00'],
+  ['CLOSING_TIME', ['22:00'], '21:00'],
+]) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  if (row && oldValues.includes(String(row.value).slice(0, 5))) {
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(newValue, key);
+  }
 }
 db.prepare(`DELETE FROM settings WHERE key IN (
   'SAUCE_ML_PER_PORTION_MENTAI','SAUCE_ML_PER_PORTION_PEDAS', 'CHILI_OIL_ML_PER_4PCS','CHILI_OIL_ML_PER_6PCS',
