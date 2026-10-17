@@ -77,6 +77,8 @@ function syncFlowchartMenuCatalog() {
           SELECT ?, id FROM addons WHERE active=1 AND LOWER(name) IN ('mozzarella','nori','saus pedas','chili oil')
           ON CONFLICT DO NOTHING`).run(row.id);
       }
+      // Remove duplicate legacy catalog entries while preserving historical transaction rows.
+      db.prepare("UPDATE menu SET active=0 WHERE LOWER(name) IN ('dimsum original 4pcs','dimsum original 6pcs')").run();
       // Flowchart defines each of the four optional add-ons at Rp2.000 per quantity.
       db.prepare("UPDATE addons SET price=2000 WHERE active=1 AND LOWER(name) IN ('mozzarella','nori','saus pedas','chili oil')").run();
       // Normalize the old names into the new category labels without renaming historical references.
