@@ -26,6 +26,19 @@ for (const page of ['admin.html', 'staff.html']) {
 }
 console.log('PASS POS menu ID compatibility checks (admin and staff).');
 
+// Sauce and packaging stock must be deducted only from the active recipe, never injected as free POS add-ons.
+const posServiceForRecipeOnly = fs.readFileSync(path.join(root, 'src', 'services', 'pos.js'), 'utf8');
+if (posServiceForRecipeOnly.includes('getIncludedSauceAddons') || posServiceForRecipeOnly.includes('const includedSauces =') || !posServiceForRecipeOnly.includes('const allAddons = addons;')) {
+  throw new Error('Chili Oil, Saus Pedas, and ziplock must be controlled through Recipes, not automatically added to each POS transaction.');
+}
+for (const page of ['admin.html', 'staff.html']) {
+  const html = fs.readFileSync(path.join(root, 'public', page), 'utf8');
+  if (/otomatis disertakan|\+ Gratis: Saus Pedas 15 g/i.test(html)) {
+    throw new Error(`public/${page} must not claim sauce/packaging are automatically included outside Recipes.`);
+  }
+}
+console.log('PASS recipe-only stock deduction for Chili Oil, Saus Pedas, and ziplock.');
+
 // Guard core Excel/import/report changes against accidental regression.
 const excelService = fs.readFileSync(path.join(root, 'src', 'services', 'excel.js'), 'utf8');
 if (!excelService.includes('workbook.xlsx.writeBuffer()') || !excelService.includes('readExcelRows') || !excelService.includes('sendTemplateXlsx')) {
