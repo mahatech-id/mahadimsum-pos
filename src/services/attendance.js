@@ -41,9 +41,12 @@ function checkIn({ employeeId, actorId, lat, lng, photo, note }) {
   const now = dayjs();
   let lateMinutes = 0;
   if (scheduled) {
-    const [h, m] = scheduled.start_time.split(':').map(Number);
-    const scheduledStart = dayjs().hour(h).minute(m).second(0);
-    lateMinutes = Math.max(0, now.diff(scheduledStart, 'minute'));
+    // CLOCK_IN_TIME is the lateness threshold (13:30 by default); OPENING_TIME
+    // is the schedule label shown to staff and is not the lateness threshold.
+    const threshold = String(getSetting('CLOCK_IN_TIME') || '13:30').slice(0, 5);
+    const [h, m] = threshold.split(':').map(Number);
+    const thresholdMoment = dayjs().hour(h).minute(m).second(0).millisecond(0);
+    lateMinutes = Math.max(0, now.diff(thresholdMoment, 'minute'));
   }
   const status = lateMinutes > 0 ? 'LATE' : 'PRESENT';
 
@@ -98,10 +101,11 @@ function manualEntry({ employeeId, date, checkIn: checkInTime, checkOut: checkOu
   if (checkInTime) {
     const scheduled = db.prepare('SELECT * FROM schedules WHERE employee_id = ? AND day_of_week = ?').get(employeeId, d.day());
     if (scheduled) {
-      const [h, m] = scheduled.start_time.split(':').map(Number);
-      const scheduledStart = dayjs(`${date} ${checkInTime}`);
-      const scheduledStartTime = dayjs(date).hour(h).minute(m).second(0);
-      lateMinutes = Math.max(0, scheduledStart.diff(scheduledStartTime, 'minute'));
+      const threshold = String(getSetting('CLOCK_IN_TIME') || '13:30').slice(0, 5);
+      const actual = dayjs(`${date} ${checkInTime}`);
+      const [h, m] = threshold.split(':').map(Number);
+      const thresholdTime = dayjs(date).hour(h).minute(m).second(0);
+      lateMinutes = Math.max(0, actual.diff(thresholdTime, 'minute'));
     }
   }
   let overtimeMinutes = 0;
@@ -176,10 +180,11 @@ function correctAttendance({ attendanceId, patch, actorId }) {
   if (patch.check_in !== undefined) {
     lateMinutes = 0;
     if (checkInTime && schedule) {
-      const [h, m] = schedule.start_time.split(':').map(Number);
+      const threshold = String(getSetting('CLOCK_IN_TIME') || '13:30').slice(0, 5);
+      const [h, m] = threshold.split(':').map(Number);
       const actual = dayjs(`${date} ${checkInTime}`);
-      const scheduledStart = dayjs(date).hour(h).minute(m).second(0);
-      lateMinutes = Math.max(0, actual.diff(scheduledStart, 'minute'));
+      const thresholdTime = dayjs(date).hour(h).minute(m).second(0);
+      lateMinutes = Math.max(0, actual.diff(thresholdTime, 'minute'));
     }
   }
   let overtimeMinutes = Number(before.overtime_minutes || 0);
