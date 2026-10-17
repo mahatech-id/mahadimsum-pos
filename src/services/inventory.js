@@ -61,6 +61,7 @@ function getRecipeItems(recipeId) {
 function deductForSale({ recipeId, qtySold, referenceId, actorId, allowNegative }) {
   const items = getRecipeItems(recipeId);
   for (const ri of items) {
+    if (/^(dimsum|ekado|lumpia)$/i.test(String(ri.item_name || '').trim())) continue;
     applyStockChange({
       inventoryItemId: ri.inventory_item_id,
       type: 'SALE',
@@ -76,6 +77,7 @@ function deductForSale({ recipeId, qtySold, referenceId, actorId, allowNegative 
 function restoreForVoid({ recipeId, qtySold, referenceId, actorId }) {
   const items = getRecipeItems(recipeId);
   for (const ri of items) {
+    if (/^(dimsum|ekado|lumpia)$/i.test(String(ri.item_name || '').trim())) continue;
     applyStockChange({
       inventoryItemId: ri.inventory_item_id,
       type: 'RETURN',

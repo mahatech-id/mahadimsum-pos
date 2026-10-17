@@ -26,6 +26,30 @@ const insertTrxAddon = db.prepare(`INSERT INTO transaction_item_addons (transact
 function deductItemAddons(itemId, referenceId, actorId, allowNegative = false) {
   for (const a of db.prepare('SELECT * FROM transaction_item_addons WHERE transaction_item_id=?').all(itemId)) applyStockChange({ inventoryItemId:a.inventory_item_id, type:'SALE', quantity:-(a.quantity*a.quantity_per_addon), referenceId, note:`Add On ${a.addon_name} x${a.quantity}`, actorId, allowNegative });
 }
+function parseVariants(notes) {
+  const match = String(notes || '').match(/\[\[VARIANTS:([^\]]+)\]\]/);
+  if (!match) return { variants: [], notes: notes || null };
+  try { return { variants: JSON.parse(decodeURIComponent(match[1])), notes: String(notes).replace(match[0], '').trim() || null }; }
+  catch { return { variants: [], notes: notes || null }; }
+}
+function getVariantInventory(name) {
+  return db.prepare('SELECT * FROM inventory_items WHERE lower(trim(name)) = lower(?) AND active = 1 ORDER BY id LIMIT 1').get(name);
+}
+function deductVariants(variants, referenceId, actorId, allowNegative = false) {
+  for (const v of variants || []) {
+    const qty = Number(v.quantity || 0); if (!Number.isInteger(qty) || qty < 1) continue;
+    const inv = getVariantInventory(v.name);
+    if (!inv) throw new Error(`Item stok varian \"${v.name}\" belum tersedia di menu Stock.`);
+    applyStockChange({ inventoryItemId: inv.id, type:'SALE', quantity:-qty, referenceId, note:`Varian terjual: ${v.name} x${qty}`, actorId, allowNegative });
+  }
+}
+function restoreVariants(variants, referenceId, actorId) {
+  for (const v of variants || []) {
+    const qty = Number(v.quantity || 0); if (!Number.isInteger(qty) || qty < 1) continue;
+    const inv = getVariantInventory(v.name); if (!inv) continue;
+    applyStockChange({ inventoryItemId: inv.id, type:'RETURN', quantity:qty, referenceId, note:`Void varian: ${v.name} x${qty}`, actorId, allowNegative:true });
+  }
+}
 function restoreItemAddons(itemId, referenceId, actorId) {
   for (const a of db.prepare('SELECT * FROM transaction_item_addons WHERE transaction_item_id=?').all(itemId)) applyStockChange({ inventoryItemId:a.inventory_item_id, type:'RETURN', quantity:(a.quantity*a.quantity_per_addon), referenceId, note:`Void Add On ${a.addon_name} x${a.quantity}`, actorId, allowNegative:true });
 }
@@ -60,14 +84,18 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
         if (!addon) throw new Error(`Add On tidak tersedia untuk menu ${menu.name}.`);
         return { ...addon, quantity: q };
       });
-      return { menu, recipe, quantity, notes: it.notes || null, addons };
+      const variants = Array.isArray(it.variants) ? it.variants.filter(v => Number(v.quantity) > 0).map(v => ({ name: String(v.name || ''), quantity: Number(v.quantity) })) : [];
+      if (variants.some(v => !['Dimsum','Ekado','Lumpia'].includes(v.name) || !Number.isInteger(v.quantity) || v.quantity < 1 || v.quantity > 6)) throw new Error('Pilihan varian Dimsum/Ekado/Lumpia tidak valid.');
+      const cleanNotes = it.notes || null;
+      const savedNotes = variants.length ? `${cleanNotes || ''} [[VARIANTS:${encodeURIComponent(JSON.stringify(variants))}]]`.trim() : cleanNotes;
+      return { menu, recipe, quantity, notes: savedNotes, addons, variants };
     });
 
     // Stock sufficiency check BEFORE any mutation (unless negative stock allowed)
     if (!allowNegativeStock) {
       for (const r of resolved) {
         if (!r.recipe) continue;
-        const shortages = checkSufficientStock(r.recipe.id, r.quantity);
+        const shortages = checkSufficientStock(r.recipe.id, r.quantity).filter(s => !/^(dimsum|ekado|lumpia)$/i.test(s.item.trim()));
         if (shortages.length) {
           const s = shortages[0];
           const err = new Error(`Stock ${s.item} tidak mencukupi.`);
@@ -75,6 +103,16 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
           err.shortages = shortages;
           throw err;
         }
+      }
+    }
+
+    if (!allowNegativeStock) {
+      const needs = {};
+      for (const r of resolved) for (const v of r.variants) needs[v.name] = (needs[v.name] || 0) + v.quantity * r.quantity;
+      for (const [name, need] of Object.entries(needs)) {
+        const inv = getVariantInventory(name);
+        if (!inv) throw new Error(`Item stok varian \"${name}\" belum tersedia di menu Stock.`);
+        if (Number(inv.current_stock) < need) { const err = new Error(`Stock ${name} tidak mencukupi (tersedia ${inv.current_stock}, dibutuhkan ${need}).`); err.code='INSUFFICIENT_STOCK'; err.shortages=[{item:name,available:inv.current_stock,need}]; throw err; }
       }
     }
 
@@ -124,6 +162,7 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
       if (status === 'PAID' && r.recipe) {
         deductForSale({ recipeId: r.recipe.id, qtySold: r.quantity, referenceId: trxNo, actorId: cashierId, allowNegative: allowNegativeStock });
       }
+      if (status === 'PAID') deductVariants(r.variants, trxNo, cashierId, allowNegativeStock);
       if (status === 'PAID') deductItemAddons(trxItemId, trxNo, cashierId, allowNegativeStock);
     }
 
@@ -148,6 +187,7 @@ function updateQrisStatus({ transactionId, status, qrisReference, actorId }) {
       const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
       for (const it of items) {
         if (it.recipe_id) deductForSale({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+        deductVariants(parseVariants(it.notes).variants, trx.trx_no, actorId, true);
         deductItemAddons(it.id, trx.trx_no, actorId);
       }
     }
@@ -168,6 +208,7 @@ function voidTransaction({ transactionId, actorId, reason }) {
     const items = db.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?').all(transactionId);
     for (const it of items) {
       if (it.recipe_id) restoreForVoid({ recipeId: it.recipe_id, qtySold: it.quantity, referenceId: trx.trx_no, actorId });
+      restoreVariants(parseVariants(it.notes).variants, trx.trx_no, actorId);
       restoreItemAddons(it.id, trx.trx_no, actorId);
     }
     db.prepare('UPDATE transactions SET payment_status = ? WHERE id = ?').run('VOID', transactionId);
