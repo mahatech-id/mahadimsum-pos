@@ -62,3 +62,19 @@ th, td { text-align:left; padding: 8px 6px; border-bottom: 1px solid var(--borde
 .addon-table-wrap { width:100%; overflow-x:auto; }
 .addon-table { min-width:760px; }
 @media (max-width:650px) { .addon-form-grid { grid-template-columns:minmax(0,1fr); } }
+
+
+/* Add On Edit modal: consistent field spacing and responsive two-column form. */
+.modal-dialog.addon-edit-dialog { width: min(720px, calc(100vw - 28px)); max-width: 720px !important; margin: 4vh auto !important; max-height: 92vh !important; overflow-y: auto; padding: 22px !important; }
+.edit-addon-form { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.edit-addon-form h3 { margin:0 0 4px; font-size:20px; }
+.edit-addon-field { min-width:0; margin:0; }
+.edit-addon-field label { display:block; margin:0 0 6px; font-weight:600; font-size:14px; }
+.edit-addon-field input, .edit-addon-field select { display:block; width:100%; min-width:0; margin:0; }
+.edit-addon-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.edit-addon-menu-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; max-height:260px; overflow:auto; padding:12px; border:1px solid var(--border); border-radius:10px; }
+.edit-addon-menu-check { display:flex !important; align-items:flex-start; gap:8px; min-width:0; margin:0 !important; font-weight:400 !important; line-height:1.35; }
+.edit-addon-menu-check input { width:auto; flex:0 0 auto; margin:2px 0 0; }
+.edit-addon-menu-check span { min-width:0; overflow-wrap:anywhere; }
+.edit-addon-save { width:100%; margin-top:4px; }
+@media (max-width:600px) { .modal-dialog.addon-edit-dialog { width:calc(100vw - 20px); margin:10px auto !important; padding:16px !important; max-height:calc(100vh - 20px) !important; } .edit-addon-grid, .edit-addon-menu-grid { grid-template-columns:minmax(0,1fr); } }

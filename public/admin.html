@@ -40,7 +40,7 @@
   </div>
 </div>
 <div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;" onclick="closeModal(event)">
-  <div style="background:#fff;max-width:480px;margin:60px auto;border-radius:14px;padding:16px;max-height:75vh;overflow:auto;" onclick="event.stopPropagation()">
+  <div class="modal-dialog" style="background:#fff;max-width:480px;margin:60px auto;border-radius:14px;padding:16px;max-height:75vh;overflow:auto;" onclick="event.stopPropagation()">
     <div id="modalBody"></div>
     <button class="secondary" id="modalCloseBtn" style="margin-top:10px;width:100%;" onclick="closeModal()">Tutup</button>
   </div>
@@ -75,7 +75,7 @@ function formatJakartaDateTime(value) {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
   }).format(parsed);
 }
-function closeModal() { if (window.qrisPaymentModalActive) return; document.getElementById('modalOverlay').style.display = 'none'; }
+function closeModal() { if (window.qrisPaymentModalActive) return; document.getElementById('modalOverlay').style.display = 'none'; const dialog=document.querySelector('#modalOverlay .modal-dialog'); if(dialog)dialog.classList.remove('addon-edit-dialog'); }
 async function showTrxDetail(id) {
   const trx = await api('GET', `/pos/transactions/${id}`);
   const tagClass = s => s==='PAID'?'paid':s==='VOID'?'void':'pending';
@@ -451,14 +451,17 @@ async function createAddon(){
 }
 async function editAddon(id){
  const d=window._addonCache;const a=d.addons.find(x=>String(x.id)===String(id));if(!a)return;
- document.getElementById('modalBody').innerHTML=`<h3>Edit Add On</h3>
- <label>Nama Add On</label><input id="editAddonName" value="${String(a.name).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
- <label>Bahan stok</label><select id="editAddonInventory" onchange="syncEditAddonUnit()">${d.inventory.map(i=>`<option value="${i.id}" ${String(i.id)===String(a.inventory_item_id)?'selected':''}>${i.name} (${i.unit})</option>`).join('')}</select>
- <div class="grid2"><div><label>Harga jual (Rp)</label><input id="editAddonPrice" type="number" min="0" value="${a.price}"></div><div><label>Takaran per Add On</label><input id="editAddonFormula" type="number" min="0.001" step="any" value="${a.quantity_per_addon}"></div></div>
- <label>Satuan formula</label><input id="editAddonUnit" value="${a.unit}">
- <label>Status</label><select id="editAddonActive"><option value="1" ${Number(a.active)?'selected':''}>Aktif</option><option value="0" ${!Number(a.active)?'selected':''}>Nonaktif</option></select>
- <label>Relasikan ke menu</label><div class="grid2" style="max-height:240px;overflow:auto;">${d.menus.filter(m=>Number(m.active)!==0).map(m=>`<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" class="editAddonMenu" value="${m.id}" ${(a.menu_ids||[]).some(x=>String(x)===String(m.id))?'checked':''}> ${m.name}</label>`).join('')}</div>
- <button onclick="saveEditAddon(${a.id})">Simpan Perubahan</button>`;
+ const escAttr = value => escapeHtml(value);
+ const inventoryOptions = d.inventory.map(i=>`<option value="${i.id}" ${String(i.id)===String(a.inventory_item_id)?'selected':''}>${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('');
+ const menuOptions = d.menus.filter(m=>Number(m.active)!==0).map(m=>`<label class="edit-addon-menu-check"><input type="checkbox" class="editAddonMenu" value="${m.id}" ${(a.menu_ids||[]).some(x=>String(x)===String(m.id))?'checked':''}><span>${escapeHtml(m.name)}</span></label>`).join('');
+ document.getElementById('modalBody').innerHTML=`<div class="edit-addon-form"><h3>Edit Add On</h3>
+ <div class="edit-addon-field"><label for="editAddonName">Nama Add On</label><input id="editAddonName" value="${escAttr(a.name)}"></div>
+ <div class="edit-addon-field"><label for="editAddonInventory">Bahan stok</label><select id="editAddonInventory" onchange="syncEditAddonUnit()">${inventoryOptions || '<option value="">Tidak ada bahan stok aktif</option>'}</select></div>
+ <div class="edit-addon-grid"><div class="edit-addon-field"><label for="editAddonPrice">Harga jual (Rp)</label><input id="editAddonPrice" type="number" min="0" step="1" value="${a.price}"></div><div class="edit-addon-field"><label for="editAddonFormula">Takaran per Add On</label><input id="editAddonFormula" type="number" min="0.001" step="any" value="${a.quantity_per_addon}"></div></div>
+ <div class="edit-addon-grid"><div class="edit-addon-field"><label for="editAddonUnit">Satuan formula</label><input id="editAddonUnit" value="${escapeHtml(a.unit)}" readonly></div><div class="edit-addon-field"><label for="editAddonActive">Status</label><select id="editAddonActive"><option value="1" ${Number(a.active)?'selected':''}>Aktif</option><option value="0" ${!Number(a.active)?'selected':''}>Nonaktif</option></select></div></div>
+ <div class="edit-addon-field"><label>Relasikan ke menu</label><div class="edit-addon-menu-grid">${menuOptions || '<span class="muted">Belum ada menu aktif.</span>'}</div></div>
+ <button class="edit-addon-save" onclick="saveEditAddon(${a.id})">Simpan Perubahan</button></div>`;
+ const dialog=document.querySelector('#modalOverlay .modal-dialog'); if(dialog)dialog.classList.add('addon-edit-dialog');
  document.getElementById('modalCloseBtn').textContent='Batal';document.getElementById('modalOverlay').style.display='block';
 }
 async function syncEditAddonUnit(){const inv=window._addonInventoryCache?.find(i=>String(i.id)===String(document.getElementById('editAddonInventory')?.value));if(inv)document.getElementById('editAddonUnit').value=inv.unit;}
@@ -493,7 +496,7 @@ async function loadRecipeFor(menuId) {
     html += `<div style="margin-bottom:10px;padding:8px;border:1px solid #eee;border-radius:8px;">
       <b>Version ${r.version}</b> ${r.active?'<span class="tag paid">Active</span>':'<span class="tag void">Inactive</span>'}
       ${r.active?`<button class="secondary" onclick="editActiveRecipe(${menuId},${r.id})">Edit versi aktif</button>`:`<button class="secondary" onclick="deleteInactiveRecipe(${menuId},${r.id})">Hapus versi nonaktif</button>`}
-      <table>${r.items.map(i=>`<tr><td>${esc(i.item_name)}</td><td>${i.quantity} ${esc(i.unit)}</td></tr>`).join('')}</table>
+      <table>${r.items.filter(i=>!isVariantStockName(i.item_name)).map(i=>`<tr><td>${esc(i.item_name)}</td><td>${i.quantity} ${esc(i.unit)}</td></tr>`).join('')}</table>
     </div>`;
   }
   html += `</div><div class="card"><h3 id="recipeEditorTitle">Buat Versi Baru</h3><p class="muted">Bahan yang belum disimpan bisa dihapus dengan tombol Hapus pada barisnya. Mengedit versi aktif akan membuat versi baru agar riwayat recipe lama tetap tersimpan.</p><div id="newRecipeItems"></div>
@@ -502,8 +505,10 @@ async function loadRecipeFor(menuId) {
   document.getElementById('recipeDetail').innerHTML = html;
   addRecipeItemRow();
 }
+function isVariantStockName(name) { return /^(dimsum|ekado|lumpia)$/i.test(String(name || '').trim()); }
 function recipeRowHtml(selectedId='', quantity='') {
-  const usableItems = invItemsCache.filter(i => Number(i.active) === 1 || i.active === true || i.active === '1');
+  // Dimsum/Ekado/Lumpia stock is deducted only from the variant selection in the POS order popup.
+  const usableItems = invItemsCache.filter(i => (Number(i.active) === 1 || i.active === true || i.active === '1') && !isVariantStockName(i.name));
   const options=usableItems.map(i=>`<option value="${i.id}" data-unit="${escapeHtml(i.unit)}" ${String(i.id)===String(selectedId)?'selected':''}>${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('');
   const div=document.createElement('div'); div.className='grid2 recipeRow';
   div.innerHTML=`<select class="riItem" ${options ? '' : 'disabled'}>${options || '<option value="">Tidak ada bahan inventory aktif</option>'}</select><div style="display:flex;gap:6px;align-items:center;"><input class="riQty" type="number" min="0.001" step="0.01" placeholder="Quantity" value="${quantity}" style="flex:1;min-width:0;"><button type="button" class="secondary" onclick="this.closest('.recipeRow').remove()">Hapus</button></div>`;
@@ -513,8 +518,9 @@ function addRecipeItemRow(selectedId='', quantity='') { const target=document.ge
 async function editActiveRecipe(menuId, recipeId) {
   const recipes=await api('GET',`/menu/${menuId}/recipes`); const recipe=recipes.find(r=>String(r.id)===String(recipeId)); if(!recipe||!recipe.active)return;
   const target=document.getElementById('newRecipeItems'); target.innerHTML='';
-  recipe.items.forEach(i=>addRecipeItemRow(i.inventory_item_id,i.quantity));
-  if(!recipe.items.length)addRecipeItemRow();
+  const recipeItems = recipe.items.filter(i => !isVariantStockName(i.item_name));
+  recipeItems.forEach(i=>addRecipeItemRow(i.inventory_item_id,i.quantity));
+  if(!recipeItems.length)addRecipeItemRow();
   document.getElementById('recipeEditorTitle').textContent=`Edit Version ${recipe.version} (akan disimpan sebagai versi baru)`;
   const btn=document.getElementById('saveRecipeBtn'); btn.textContent='Simpan Perubahan sebagai Versi Aktif'; btn.dataset.editing='1';
   btn.onclick=()=>saveNewRecipe(menuId);
