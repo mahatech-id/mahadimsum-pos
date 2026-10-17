@@ -329,11 +329,14 @@ async function renderJadwal() {
   setPageTitle('Jadwal');
   const schedule = await api('GET', '/attendance/schedule');
   const days = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
-  let html = '<div class="card"><table><tr><th>Hari</th><th>Karyawan</th><th>Fokus</th></tr>';
+  const first = schedule[0] || {};
+  const opening = first.opening_time || '13:00';
+  const closing = first.clock_out_time || '21:00';
+  let html = `<div class="card"><p class="muted" style="font-size:12px;">Opening Time: <strong>${opening}</strong> · Closing Time: <strong>${closing}</strong>. Batas tidak terlambat adalah pukul 13:30; mulai pukul 13:31 keterlambatan dihitung per menit.</p><div style="overflow-x:auto;"><table><tr><th>Hari</th><th>Karyawan</th><th>Fokus</th><th>Opening Time</th><th>Closing Time</th></tr>`;
   for (const s of schedule.sort((a,b)=>a.day_of_week-b.day_of_week)) {
-    html += `<tr><td>${days[s.day_of_week]}</td><td>${s.employee_name}</td><td>${s.focus}</td></tr>`;
+    html += `<tr><td>${days[s.day_of_week]}</td><td>${s.employee_name}</td><td>${s.focus}</td><td>${s.opening_time || opening}</td><td>${s.clock_out_time || closing}</td></tr>`;
   }
-  html += '</table></div>';
+  html += '</table></div></div>';
   document.getElementById('view').innerHTML = html;
 }
 

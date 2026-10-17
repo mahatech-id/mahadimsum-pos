@@ -15,7 +15,7 @@
     <div class="card" style="margin-top:40px;">
       <h2 class="center">Masuk</h2>
       <input id="username" placeholder="Username" autocomplete="username">
-      <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+      <div style="display:flex;gap:8px;align-items:center;"><input id="password" type="password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:0;margin:0;"><button type="button" class="secondary" onclick="togglePasswordVisibility('password',this)" style="white-space:nowrap;">Lihat</button></div>
       <button class="big" onclick="login()">Masuk</button>
       <div id="err" class="error"></div>
     </div>
@@ -23,6 +23,7 @@
 </div>
 <script src="api.js"></script>
 <script>
+function togglePasswordVisibility(id, button) { const input = document.getElementById(id); if (!input) return; input.type = input.type === 'password' ? 'text' : 'password'; button.textContent = input.type === 'password' ? 'Lihat' : 'Sembunyikan'; }
 async function login() {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;

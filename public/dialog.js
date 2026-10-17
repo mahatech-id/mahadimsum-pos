@@ -22,6 +22,8 @@ function ensureDialogRoot() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) resolveDialog(null); });
 }
 
+function toggleDialogPassword(id, button) { const input = document.getElementById(id); if (!input) return; input.type = input.type === 'password' ? 'text' : 'password'; button.textContent = input.type === 'password' ? 'Lihat' : 'Sembunyikan'; }
+
 let _dlgResolve = null;
 function resolveDialog(value) {
   const overlay = document.getElementById('dlgOverlay');
@@ -63,6 +65,9 @@ function promptDialog(title, fields) {
       }
       if (f.type === 'textarea') {
         return `<label>${f.label}</label><textarea id="${id}" rows="4">${f.value ?? ''}</textarea>`;
+      }
+      if (f.type === 'password') {
+        return `<label>${f.label}</label><div style="display:flex;gap:8px;align-items:center;"><input id="${id}" type="password" value="${f.value ?? ''}" ${f.placeholder ? `placeholder="${f.placeholder}"` : ''} style="flex:1;min-width:0;margin:0;"><button type="button" class="secondary" onclick="toggleDialogPassword('${id}',this)">Lihat</button></div>`;
       }
       return `<label>${f.label}</label><input id="${id}" type="${f.type || 'text'}" value="${f.value ?? ''}" ${f.placeholder ? `placeholder="${f.placeholder}"` : ''}>`;
     }).join('');

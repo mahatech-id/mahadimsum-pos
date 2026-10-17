@@ -884,7 +884,7 @@ async function renderUsers() {
   const [users, roles, emps] = await Promise.all([api('GET','/admin/users'), api('GET','/admin/roles'), api('GET','/admin/employees')]);
   document.getElementById('view').innerHTML = `<h2>Users</h2>
     <div class="card"><h3>Tambah User</h3>
-      <input id="uUsername" placeholder="Username"><input id="uPassword" type="password" placeholder="Password">
+      <input id="uUsername" placeholder="Username"><div style="display:flex;gap:8px;align-items:center;"><input id="uPassword" type="password" placeholder="Password" style="flex:1;min-width:0;margin:0;"><button type="button" class="secondary" onclick="togglePasswordVisibility('uPassword',this)">Lihat</button></div>
       <select id="uRole">${roles.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}</select>
       <select id="uEmp"><option value="">-- tanpa employee --</option>${emps.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select>
       <button onclick="addUser()">Simpan</button></div>
@@ -943,13 +943,14 @@ async function saveRolePerms(roleId) {
 }
 
 // ---------------- Settings ----------------
+function togglePasswordVisibility(id, button) { const input = document.getElementById(id); if (!input) return; input.type = input.type === 'password' ? 'text' : 'password'; button.textContent = input.type === 'password' ? 'Lihat' : 'Sembunyikan'; }
 function escapeHtmlAttr(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 const settingLabels = { SAUCE_MENTAI_GRAMS_PER_PORTION: 'Saus Mentai — per porsi (g)', SAUCE_GARLIC_GRAMS_PER_PORTION: 'Saus Garlic — per porsi (g)' };
 async function renderSettings() {
   const settings = await api('GET','/admin/settings');
   const isMultiline = (key) => key.includes('PRIVATE_KEY') || key.includes('PEM') || key === 'QRIS_STATIC_PAYLOAD';
   document.getElementById('view').innerHTML = `<h2>Settings (Business Rules)</h2>
-    <div class="card"><h3 style="margin-top:0;">Takaran Bahan Resep</h3><p class="muted" style="font-size:12px;">Takaran saus khusus di sini langsung memperbarui BOM Recipes aktif. Chili Oil, Saus Pedas, dan kemasan diatur langsung pada menu Recipes; stok berkurang mengikuti bahan dan takaran pada recipe aktif.</p><table><tr><th>Bahan / cakupan</th><th>Takaran</th><th></th></tr>${settings.filter(s=>settingLabels[s.key]).map(s=>`<tr><td>${settingLabels[s.key]}</td><td><input type="number" min="0.01" step="0.01" value="${escapeHtmlAttr(s.value)}" id="set-${s.key}" style="margin:0;max-width:160px;"></td><td><button class="secondary" style="padding:4px 8px;" onclick="saveSetting('${s.key}')">Simpan</button></td></tr>`).join('')}</table></div>
+    <div class="card"><h3 style="margin-top:0;">Jadwal & Absensi</h3><p class="muted" style="font-size:12px;">Clock In adalah batas waktu tidak terlambat (check-in sampai pukul ini tidak terlambat; setelahnya dihitung per menit). Opening Time dan Closing Time ditampilkan di jadwal staff; Clock In tidak ditampilkan di jadwal staff.</p><table><tr><th>Pengaturan</th><th>Waktu</th><th></th></tr>${settings.filter(s=>['CLOCK_IN_TIME','OPENING_TIME','CLOSING_TIME'].includes(s.key)).map(s=>`<tr><td>${({CLOCK_IN_TIME:'Clock In (batas tidak terlambat)',OPENING_TIME:'Opening Time (ditampilkan di jadwal staff)',CLOSING_TIME:'Closing Time (ditampilkan di jadwal staff)'})[s.key]}</td><td><input type="time" value="${escapeHtmlAttr(String(s.value).slice(0,5))}" id="set-${s.key}" style="margin:0;max-width:180px;"></td><td><button class="secondary" style="padding:4px 8px;" onclick="saveSetting('${s.key}')">Simpan</button></td></tr>`).join('')}</table></div>
     <div class="card">
       <h3 style="margin-top:0;">QRIS Dinamis — Invoice dari QRIS Interactive Mobile App</h3>
       <p class="muted" style="font-size:12px;">Mode ini memakai API mobile app QRIS Interactive yang tidak resmi/didokumentasikan publik, bukan Open API berbayar dan bukan konversi QR lokal. Endpoint dapat berubah sewaktu-waktu; gunakan hanya akun merchant milik sendiri.</p>
@@ -957,10 +958,12 @@ async function renderSettings() {
       <p class="muted" style="font-size:11px;">Invoice ID dan refNo dari provider disimpan pada transaksi. POS hanya mengubah <code>PENDING → PAID</code> setelah endpoint cek invoice mengembalikan bukti tanggal sukses dan RRN. Jangan gunakan kredensial dashboard web jika akun tersebut tidak bisa login ke aplikasi mobile.</p>
     </div>
     <div class="card"><table>
-    ${settings.filter(s=>!settingLabels[s.key]).map(s=>`<tr><td style="white-space:nowrap;vertical-align:top;padding-top:10px;">${s.key}</td>
+    ${settings.filter(s=>!settingLabels[s.key] && !['CLOCK_IN_TIME','OPENING_TIME','CLOSING_TIME'].includes(s.key)).map(s=>`<tr><td style="white-space:nowrap;vertical-align:top;padding-top:10px;">${s.key}</td>
       <td>${isMultiline(s.key)
         ? `<textarea id="set-${s.key}" rows="4" placeholder="${s.configured ? '🔒 Tersimpan — tempel nilai baru untuk mengganti' : ''}" style="margin:0;font-family:monospace;font-size:12px;">${escapeHtmlAttr(s.value)}</textarea>`
-        : `<input type="${['QRIS_INTERACTIVE_PASSWORD','QRIS_INTERACTIVE_APP_PIN'].includes(s.key) ? 'password' : 'text'}" value="${escapeHtmlAttr(s.value)}" id="set-${s.key}" style="margin:0;">`}</td>
+        : (['QRIS_INTERACTIVE_PASSWORD','QRIS_INTERACTIVE_APP_PIN'].includes(s.key)
+          ? `<div style="display:flex;gap:8px;align-items:center;"><input type="password" value="${escapeHtmlAttr(s.value)}" id="set-${s.key}" style="margin:0;flex:1;min-width:0;"><button type="button" class="secondary" onclick="togglePasswordVisibility('set-${s.key}',this)">Lihat</button></div>`
+          : `<input type="text" value="${escapeHtmlAttr(s.value)}" id="set-${s.key}" style="margin:0;">`)}</td>
       <td style="vertical-align:top;"><button class="secondary" style="padding:4px 8px;" onclick="saveSetting('${s.key}')">Simpan</button></td></tr>`).join('')}
     </table></div>`;
 }
