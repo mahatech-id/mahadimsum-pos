@@ -83,9 +83,16 @@ router.post('/:id/recipes', requirePermission('recipe.manage'), (req, res) => {
 });
 
 router.delete('/recipes/:recipeId', requirePermission('recipe.manage'), (req, res) => {
-  db.prepare('UPDATE recipes SET active = 0 WHERE id = ?').run(req.params.recipeId);
-  logAudit({ actorId: req.session.userId, action: 'DELETE', module: 'recipe', recordId: req.params.recipeId });
-  res.json({ ok: true });
+  const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(req.params.recipeId);
+  if (!recipe) return res.status(404).json({ error: 'Recipe tidak ditemukan.' });
+  if (Number(recipe.active) === 1) return res.status(400).json({ error: 'Recipe aktif tidak dapat dihapus. Edit recipe aktif untuk membuat versi baru terlebih dahulu.' });
+  const remove = db.transaction(() => {
+    db.prepare('DELETE FROM recipe_items WHERE recipe_id = ?').run(req.params.recipeId);
+    db.prepare('DELETE FROM recipes WHERE id = ? AND active = 0').run(req.params.recipeId);
+  });
+  remove();
+  logAudit({ actorId: req.session.userId, action: 'DELETE', module: 'recipe', recordId: req.params.recipeId, oldValue: recipe });
+  res.json({ ok: true, deleted: true });
 });
 
 module.exports = router;
