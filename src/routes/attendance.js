@@ -1,5 +1,5 @@
 const express = require('express');
-const { db } = require('../db');
+const { db, getSetting } = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/rbac');
 const { checkIn, checkOut, correctAttendance, manualEntry } = require('../services/attendance');
 
@@ -63,7 +63,11 @@ router.post('/manual', requirePermission('attendance.correct'), (req, res) => {
 
 // ---- Schedule (Admin-editable) ----
 router.get('/schedule', requirePermission('schedule.view'), (req, res) => {
-  res.json(db.prepare(`SELECT s.*, e.name as employee_name FROM schedules s JOIN employees e ON e.id = s.employee_id ORDER BY day_of_week`).all());
+  const rows = db.prepare(`SELECT s.*, e.name as employee_name FROM schedules s JOIN employees e ON e.id = s.employee_id ORDER BY day_of_week`).all();
+  const clockInTime = getSetting('CLOCK_IN_TIME') || '13:30';
+  const openingTime = getSetting('OPENING_TIME') || '13:00';
+  const clockOutTime = getSetting('CLOSING_TIME') || '21:00';
+  res.json(rows.map(row => ({ ...row, clock_in_time: clockInTime, opening_time: openingTime, clock_out_time: clockOutTime })));
 });
 
 router.post('/schedule', requirePermission('schedule.manage'), (req, res) => {
