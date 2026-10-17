@@ -95,6 +95,8 @@ function checkSufficientStock(recipeId, qty) {
   const items = getRecipeItems(recipeId);
   const shortages = [];
   for (const ri of items) {
+    // Variant stock (Dimsum/Ekado/Lumpia) is controlled by the POS variant picker, not recipes.
+    if (/^(dimsum|ekado|lumpia)$/i.test(String(ri.item_name || '').trim())) continue;
     const item = getItem.get(ri.inventory_item_id);
     const need = ri.quantity * qty;
     if (item.current_stock - need < 0) {

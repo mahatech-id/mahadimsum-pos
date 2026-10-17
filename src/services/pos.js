@@ -44,25 +44,6 @@ function deductVariants(variants, referenceId, actorId, allowNegative = false) {
   }
 }
 
-function sauceStockQuantity(inventory) {
-  const unit = String(inventory.unit || '').trim().toLowerCase();
-  if (unit === 'kg' || unit === 'kilogram') return 0.015;
-  if (unit === 'mg') return 15000;
-  // Default to grams for sauce inventory; one free pack is exactly 15 g.
-  return 15;
-}
-function getIncludedSauceAddons() {
-  const result = [];
-  for (const name of ['Saus Pedas', 'Chili Oil']) {
-    const addon = db.prepare(`SELECT a.*, ii.unit AS inventory_unit, ii.name AS inventory_name
-      FROM addons a JOIN inventory_items ii ON ii.id=a.inventory_item_id
-      WHERE lower(trim(a.name))=lower(?) AND a.active=1 AND ii.active=1 ORDER BY a.id LIMIT 1`).get(name);
-    if (!addon) throw new Error(`Item Add On/stok "${name}" harus tersedia agar setiap pesanan mendapat saus gratis 15 g.`);
-    result.push({ ...addon, name: `${name} (Gratis 15 g, Ziplock)`, price: 0, quantity: 1,
-      quantity_per_addon: sauceStockQuantity({ unit: addon.inventory_unit }), unit: addon.inventory_unit });
-  }
-  return result;
-}
 function restoreVariants(variants, referenceId, actorId) {
   for (const v of variants || []) {
     const qty = Number(v.quantity || 0); if (!Number.isInteger(qty) || qty < 1) continue;
@@ -104,10 +85,9 @@ function createTransaction({ items, payment, cashierId, type = 'POS', discount =
         if (!addon) throw new Error(`Add On tidak tersedia untuk menu ${menu.name}.`);
         return { ...addon, quantity: q };
       });
-      // Every purchased menu line includes two complimentary 15 g sauce packs in ziplock.
-      // They are stored as zero-price transaction add-ons so stock, receipts, and voids stay auditable.
-      const includedSauces = getIncludedSauceAddons();
-      const allAddons = [...addons, ...includedSauces];
+      // All ingredient consumption, including sauces and packaging, is controlled only by the active Recipes BOM.
+      // Add Ons are deducted only when the cashier explicitly selects them.
+      const allAddons = addons;
       const variants = Array.isArray(it.variants) ? it.variants.filter(v => Number(v.quantity) > 0).map(v => ({ name: String(v.name || ''), quantity: Number(v.quantity) })) : [];
       if (variants.some(v => !['Dimsum','Ekado','Lumpia'].includes(v.name) || !Number.isInteger(v.quantity) || v.quantity < 1)) throw new Error('Pilihan varian Dimsum/Ekado/Lumpia tidak valid.');
       const isSingleMenu = /dimsum satuan/i.test(menu.name);
