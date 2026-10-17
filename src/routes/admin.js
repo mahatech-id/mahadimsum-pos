@@ -256,16 +256,12 @@ router.get('/payroll/:id/payslip', requireAuth, (req, res) => {
 
 // ---- Settings ----
 const RECIPE_CONSUMPTION_SETTINGS = {
-  CHILI_OIL_GRAMS_PER_4PCS: { label: 'Chili Oil — menu 4 pcs', unit: 'g', item: 'Chili Oil', menus: ['Dimsum 4pcs','Dimsum Mentai Original','Dimsum Garlic Original','Dimsum Mozza','Dimsum Nori','Dimsum Mix Mentai Garlic 4pcs'], factor: 0.001 },
-  CHILI_OIL_GRAMS_PER_6PCS: { label: 'Chili Oil — menu 6 pcs', unit: 'g', item: 'Chili Oil', menus: ['Dimsum 6pcs','Dimsum Mix Mentai Garlic 6pcs'], factor: 0.001 },
-  SAUCE_PEDAS_GRAMS_PER_4PCS: { label: 'Saus Pedas — menu 4 pcs', unit: 'g', item: 'Saus Pedas', menus: ['Dimsum 4pcs','Dimsum Mozza','Dimsum Nori','Dimsum Mix Mentai Garlic 4pcs'], factor: 0.001 },
-  SAUCE_PEDAS_GRAMS_PER_6PCS: { label: 'Saus Pedas — menu 6 pcs', unit: 'g', item: 'Saus Pedas', menus: ['Dimsum 6pcs','Dimsum Mix Mentai Garlic 6pcs'], factor: 0.001 },
   SAUCE_MENTAI_GRAMS_PER_PORTION: { label: 'Saus Mentai — per pcs dimsum', unit: 'g', item: 'Saus Mentai', menus: ['Dimsum Mentai Original'], factor: 0.001, menuMultipliers: { 'Dimsum Mix Mentai Garlic 4pcs': 2, 'Dimsum Mix Mentai Garlic 6pcs': 3 } },
   SAUCE_GARLIC_GRAMS_PER_PORTION: { label: 'Saus Garlic — per pcs dimsum', unit: 'g', item: 'Saus Garlic', menus: ['Dimsum Garlic Original'], factor: 0.001, menuMultipliers: { 'Dimsum Mix Mentai Garlic 4pcs': 2, 'Dimsum Mix Mentai Garlic 6pcs': 3 } },
 };
 router.get('/settings', requirePermission('settings.manage'), (req, res) => {
   // Never ship QRIS login secrets back to the browser. Recipe config is explicitly labeled with user-facing units.
-  const settings = getAllSettings().filter(r => !['SAUCE_ML_PER_PORTION_MENTAI','SAUCE_ML_PER_PORTION_PEDAS'].includes(r.key));
+  const settings = getAllSettings().filter(r => !['SAUCE_ML_PER_PORTION_MENTAI','SAUCE_ML_PER_PORTION_PEDAS', 'CHILI_OIL_GRAMS_PER_4PCS','CHILI_OIL_GRAMS_PER_6PCS','SAUCE_PEDAS_GRAMS_PER_4PCS','SAUCE_PEDAS_GRAMS_PER_6PCS'].includes(r.key));
   const byKey = new Map(settings.map(r => [r.key, r]));
   const recipeSettings = Object.entries(RECIPE_CONSUMPTION_SETTINGS).map(([key, meta]) => ({
     key, value: byKey.get(key)?.value ?? (key.includes('6PCS') ? '15' : key.includes('MENTAI') || key.includes('GARLIC') ? '30' : '15'),

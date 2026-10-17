@@ -67,6 +67,13 @@ router.get('/:id/recipes', requirePermission('recipe.view'), (req, res) => {
 router.post('/:id/recipes', requirePermission('recipe.manage'), (req, res) => {
   const { items } = req.body; // [{ inventory_item_id, quantity, unit }]
   const menuId = req.params.id;
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Recipe harus memiliki minimal satu bahan.' });
+  for (const it of items) {
+    const inv = db.prepare('SELECT id, name, unit, active FROM inventory_items WHERE id = ?').get(Number(it.inventory_item_id));
+    if (!inv || Number(inv.active) !== 1) return res.status(400).json({ error: 'Pilih bahan inventory yang aktif.' });
+    if (/^(dimsum|ekado|lumpia)$/i.test(String(inv.name || '').trim())) return res.status(400).json({ error: 'Dimsum, Ekado, dan Lumpia diatur dari pilihan varian saat transaksi, bukan dari Recipes.' });
+    if (!Number.isFinite(Number(it.quantity)) || Number(it.quantity) <= 0) return res.status(400).json({ error: 'Takaran bahan recipe harus lebih besar dari nol.' });
+  }
   const run = db.transaction(() => {
     const last = db.prepare('SELECT MAX(version) as v FROM recipes WHERE menu_id = ?').get(menuId);
     const newVersion = (last.v || 0) + 1;
